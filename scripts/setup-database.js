@@ -207,10 +207,54 @@ async function setupDatabase() {
           AND (recipes.is_public = true OR recipes.user_id = auth.uid())
         )
       );`,
-      `CREATE POLICY "Users can manage ingredients for own recipes" ON public.recipe_ingredients FOR ALL USING (
+      `CREATE POLICY "Users can insert recipe ingredients for own recipes" ON public.recipe_ingredients FOR INSERT WITH CHECK (
         EXISTS (
           SELECT 1 FROM public.recipes 
           WHERE recipes.id = recipe_ingredients.recipe_id 
+          AND recipes.user_id = auth.uid()
+        )
+      );`,
+      `CREATE POLICY "Users can update recipe ingredients for own recipes" ON public.recipe_ingredients FOR UPDATE USING (
+        EXISTS (
+          SELECT 1 FROM public.recipes 
+          WHERE recipes.id = recipe_ingredients.recipe_id 
+          AND recipes.user_id = auth.uid()
+        )
+      );`,
+      `CREATE POLICY "Users can delete recipe ingredients for own recipes" ON public.recipe_ingredients FOR DELETE USING (
+        EXISTS (
+          SELECT 1 FROM public.recipes 
+          WHERE recipes.id = recipe_ingredients.recipe_id 
+          AND recipes.user_id = auth.uid()
+        )
+      );`,
+      
+      // Recipe tags policies
+      `CREATE POLICY "Users can view recipe tags for accessible recipes" ON public.recipe_tags FOR SELECT USING (
+        EXISTS (
+          SELECT 1 FROM public.recipes 
+          WHERE recipes.id = recipe_tags.recipe_id 
+          AND (recipes.is_public = true OR recipes.user_id = auth.uid())
+        )
+      );`,
+      `CREATE POLICY "Users can insert recipe tags for own recipes" ON public.recipe_tags FOR INSERT WITH CHECK (
+        EXISTS (
+          SELECT 1 FROM public.recipes 
+          WHERE recipes.id = recipe_tags.recipe_id 
+          AND recipes.user_id = auth.uid()
+        )
+      );`,
+      `CREATE POLICY "Users can update recipe tags for own recipes" ON public.recipe_tags FOR UPDATE USING (
+        EXISTS (
+          SELECT 1 FROM public.recipes 
+          WHERE recipes.id = recipe_tags.recipe_id 
+          AND recipes.user_id = auth.uid()
+        )
+      );`,
+      `CREATE POLICY "Users can delete recipe tags for own recipes" ON public.recipe_tags FOR DELETE USING (
+        EXISTS (
+          SELECT 1 FROM public.recipes 
+          WHERE recipes.id = recipe_tags.recipe_id 
           AND recipes.user_id = auth.uid()
         )
       );`,

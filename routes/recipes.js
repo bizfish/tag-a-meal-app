@@ -11,14 +11,41 @@ const supabase = createClient(
 // Get all recipes (public + user's own)
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 12, search, tags, difficulty, userId } = req.query;
+    const { page = 1, limit = 12, search, tags, difficulty, userId, publicOnly } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
+    // Create client with user's token if authenticated
+    let clientToUse = supabase;
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    let currentUserId = null;
+    
+    if (token) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (user) {
+          currentUserId = user.id;
+          clientToUse = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+              global: {
+                headers: {
+                  Authorization: req.headers.authorization
+                }
+              }
+            }
+          );
+        }
+      } catch (error) {
+        console.log('Token validation failed, using anonymous access');
+      }
+    }
+
+    let query = clientToUse
       .from('recipes')
       .select(`
         *,
-        users!recipes_user_id_fkey(full_name, avatar_url),
+        users!recipes_user_id_fkey(full_name, avatar_url, show_author_name),
         recipe_tags(tags(id, name, color)),
         recipe_ingredients(
           id,
@@ -44,8 +71,17 @@ router.get('/', async (req, res) => {
     if (userId) {
       query = query.eq('user_id', userId);
     } else {
-      // Only show public recipes if not filtering by user
-      query = query.eq('is_public', true);
+      // Handle publicOnly parameter for front page stats
+      if (publicOnly === 'true') {
+        query = query.eq('is_public', true);
+      } else {
+        // Show public recipes + user's own recipes (if authenticated)
+        if (currentUserId) {
+          query = query.or(`is_public.eq.true,user_id.eq.${currentUserId}`);
+        } else {
+          query = query.eq('is_public', true);
+        }
+      }
     }
 
     const { data: recipes, error } = await query;
@@ -53,6 +89,42 @@ router.get('/', async (req, res) => {
     if (error) {
       console.error('Error fetching recipes:', error);
       return res.status(500).json({ error: 'Failed to fetch recipes' });
+    }
+
+    // Get total count for pagination
+    let countQuery = clientToUse
+      .from('recipes')
+      .select('id', { count: 'exact', head: true });
+
+    // Apply same filters for count
+    if (search) {
+      countQuery = countQuery.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
+    }
+
+    if (difficulty) {
+      countQuery = countQuery.eq('difficulty', difficulty);
+    }
+
+    if (userId) {
+      countQuery = countQuery.eq('user_id', userId);
+    } else {
+      // Handle publicOnly parameter for front page stats
+      if (publicOnly === 'true') {
+        countQuery = countQuery.eq('is_public', true);
+      } else {
+        // Show public recipes + user's own recipes (if authenticated)
+        if (currentUserId) {
+          countQuery = countQuery.or(`is_public.eq.true,user_id.eq.${currentUserId}`);
+        } else {
+          countQuery = countQuery.eq('is_public', true);
+        }
+      }
+    }
+
+    const { count, error: countError } = await countQuery;
+
+    if (countError) {
+      console.error('Error getting recipe count:', countError);
     }
 
     // Filter by tags if specified
@@ -66,7 +138,7 @@ router.get('/', async (req, res) => {
       );
     }
 
-    // Calculate average ratings
+    // Calculate average ratings (privacy is now handled by RLS)
     const recipesWithRatings = filteredRecipes.map(recipe => ({
       ...recipe,
       averageRating: recipe.recipe_ratings.length > 0 
@@ -80,7 +152,7 @@ router.get('/', async (req, res) => {
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total: filteredRecipes.length
+        total: count || filteredRecipes.length
       }
     });
 
@@ -96,7 +168,20 @@ router.get('/my-recipes', requireAuth, async (req, res) => {
     const { page = 1, limit = 12, search } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
+    // Create a client with the user's token for RLS compliance
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
+
+    let query = userSupabase
       .from('recipes')
       .select(`
         *,
@@ -154,7 +239,32 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data: recipe, error } = await supabase
+    // Create client with user's token if authenticated
+    let clientToUse = supabase;
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (token) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser(token);
+        if (user) {
+          clientToUse = createClient(
+            process.env.SUPABASE_URL,
+            process.env.SUPABASE_ANON_KEY,
+            {
+              global: {
+                headers: {
+                  Authorization: req.headers.authorization
+                }
+              }
+            }
+          );
+        }
+      } catch (error) {
+        console.log('Token validation failed, using anonymous access');
+      }
+    }
+
+    const { data: recipes, error } = await clientToUse
       .from('recipes')
       .select(`
         *,
@@ -175,13 +285,18 @@ router.get('/:id', async (req, res) => {
           users!recipe_ratings_user_id_fkey(full_name)
         )
       `)
-      .eq('id', id)
-      .single();
+      .eq('id', id);
 
     if (error) {
       console.error('Error fetching recipe:', error);
+      return res.status(500).json({ error: 'Failed to fetch recipe' });
+    }
+
+    if (!recipes || recipes.length === 0) {
       return res.status(404).json({ error: 'Recipe not found' });
     }
+
+    const recipe = recipes[0];
 
     // Calculate average rating
     const averageRating = recipe.recipe_ratings.length > 0 
@@ -222,8 +337,45 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Title and instructions are required' });
     }
 
-    // Create recipe
-    const { data: recipe, error: recipeError } = await supabase
+    // Create a client with the user's token for RLS compliance
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
+
+    // Ensure user profile exists in public.users table
+    const { data: existingProfile } = await userSupabase
+      .from('users')
+      .select('id')
+      .eq('id', req.user.id)
+      .single();
+
+    if (!existingProfile) {
+      // Create user profile if it doesn't exist using user's token context
+      const { error: profileError } = await userSupabase
+        .from('users')
+        .insert({
+          id: req.user.id,
+          email: req.user.email,
+          full_name: req.user.user_metadata?.full_name || '',
+          avatar_url: req.user.user_metadata?.avatar_url || null
+        });
+
+      if (profileError) {
+        console.error('Error creating user profile:', profileError);
+        return res.status(400).json({ error: 'Failed to create user profile' });
+      }
+    }
+
+    // Create recipe using user's token context
+    const { data: recipe, error: recipeError } = await userSupabase
       .from('recipes')
       .insert({
         user_id: req.user.id,
@@ -245,18 +397,18 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: recipeError.message });
     }
 
-    // Add ingredients
+    // Add ingredients using user's token context
     if (ingredients && ingredients.length > 0) {
       for (const ingredient of ingredients) {
         // First, ensure the ingredient exists
-        let { data: existingIngredient } = await supabase
+        let { data: existingIngredient } = await userSupabase
           .from('ingredients')
           .select('id')
           .eq('name', ingredient.name)
           .single();
 
         if (!existingIngredient) {
-          const { data: newIngredient } = await supabase
+          const { data: newIngredient } = await userSupabase
             .from('ingredients')
             .insert({ name: ingredient.name, category: ingredient.category })
             .select('id')
@@ -264,8 +416,8 @@ router.post('/', requireAuth, async (req, res) => {
           existingIngredient = newIngredient;
         }
 
-        // Add to recipe_ingredients
-        await supabase
+        // Add to recipe_ingredients using user's token context
+        await userSupabase
           .from('recipe_ingredients')
           .insert({
             recipe_id: recipe.id,
@@ -277,10 +429,10 @@ router.post('/', requireAuth, async (req, res) => {
       }
     }
 
-    // Add tags
+    // Add tags using user's token context
     if (tags && tags.length > 0) {
       for (const tagId of tags) {
-        await supabase
+        await userSupabase
           .from('recipe_tags')
           .insert({
             recipe_id: recipe.id,
@@ -335,23 +487,41 @@ router.put('/:id', requireAuth, async (req, res) => {
       tags
     } = req.body;
 
-    // Check if user owns the recipe
-    const { data: existingRecipe, error: checkError } = await supabase
+    // Create a client with the user's token for RLS compliance
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
+
+    // Check if user owns the recipe using user's token context
+    const { data: existingRecipes, error: checkError } = await userSupabase
       .from('recipes')
       .select('user_id')
-      .eq('id', id)
-      .single();
+      .eq('id', id);
 
-    if (checkError || !existingRecipe) {
+    if (checkError) {
+      console.error('Error checking recipe ownership:', checkError);
+      return res.status(500).json({ error: 'Failed to verify recipe ownership' });
+    }
+
+    if (!existingRecipes || existingRecipes.length === 0) {
       return res.status(404).json({ error: 'Recipe not found' });
     }
 
+    const existingRecipe = existingRecipes[0];
     if (existingRecipe.user_id !== req.user.id) {
       return res.status(403).json({ error: 'Not authorized to update this recipe' });
     }
 
-    // Update recipe
-    const { data: recipe, error: updateError } = await supabase
+    // Update recipe using user's token context
+    const { data: updatedRecipes, error: updateError } = await userSupabase
       .from('recipes')
       .update({
         title,
@@ -366,62 +536,67 @@ router.put('/:id', requireAuth, async (req, res) => {
         updated_at: new Date().toISOString()
       })
       .eq('id', id)
-      .select()
-      .single();
+      .select();
 
     if (updateError) {
       console.error('Error updating recipe:', updateError);
       return res.status(400).json({ error: updateError.message });
     }
 
-    // Update ingredients
+    if (!updatedRecipes || updatedRecipes.length === 0) {
+      return res.status(404).json({ error: 'Recipe not found after update' });
+    }
+
+    // Update ingredients using user's token context
     if (ingredients) {
       // Delete existing ingredients
-      await supabase
+      await userSupabase
         .from('recipe_ingredients')
         .delete()
         .eq('recipe_id', id);
 
       // Add new ingredients
       for (const ingredient of ingredients) {
-        let { data: existingIngredient } = await supabase
+        let { data: existingIngredients } = await userSupabase
           .from('ingredients')
           .select('id')
-          .eq('name', ingredient.name)
-          .single();
+          .eq('name', ingredient.name);
+
+        let existingIngredient = existingIngredients && existingIngredients.length > 0 ? existingIngredients[0] : null;
 
         if (!existingIngredient) {
-          const { data: newIngredient } = await supabase
+          const { data: newIngredients } = await userSupabase
             .from('ingredients')
             .insert({ name: ingredient.name, category: ingredient.category })
-            .select('id')
-            .single();
-          existingIngredient = newIngredient;
+            .select('id');
+          existingIngredient = newIngredients && newIngredients.length > 0 ? newIngredients[0] : null;
         }
 
-        await supabase
-          .from('recipe_ingredients')
-          .insert({
-            recipe_id: id,
-            ingredient_id: existingIngredient.id,
-            quantity: ingredient.quantity,
-            unit: ingredient.unit,
-            notes: ingredient.notes
-          });
+        if (existingIngredient) {
+          await userSupabase
+            .from('recipe_ingredients')
+            .insert({
+              recipe_id: id,
+              ingredient_id: existingIngredient.id,
+              quantity: ingredient.quantity,
+              unit: ingredient.unit,
+              notes: ingredient.notes
+            });
+        }
       }
     }
 
-    // Update tags
+    // Update tags using user's token context
     if (tags) {
       // Delete existing tags
-      await supabase
+      await userSupabase
         .from('recipe_tags')
         .delete()
         .eq('recipe_id', id);
 
       // Add new tags
       for (const tagId of tags) {
-        await supabase
+        await userSupabase
           .from('recipe_tags')
           .insert({
             recipe_id: id,
@@ -430,8 +605,8 @@ router.put('/:id', requireAuth, async (req, res) => {
       }
     }
 
-    // Fetch the complete updated recipe
-    const { data: completeRecipe } = await supabase
+    // Fetch the complete updated recipe using user's token context
+    const { data: completeRecipes } = await userSupabase
       .from('recipes')
       .select(`
         *,
@@ -444,8 +619,9 @@ router.put('/:id', requireAuth, async (req, res) => {
           ingredients(id, name, category)
         )
       `)
-      .eq('id', id)
-      .single();
+      .eq('id', id);
+
+    const completeRecipe = completeRecipes && completeRecipes.length > 0 ? completeRecipes[0] : null;
 
     res.json({
       message: 'Recipe updated successfully',
@@ -463,8 +639,21 @@ router.post('/:id/copy', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get the original recipe
-    const { data: originalRecipe, error: fetchError } = await supabase
+    // Create a client with the user's token for RLS compliance
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
+
+    // Get the original recipe using user's token context
+    const { data: originalRecipes, error: fetchError } = await userSupabase
       .from('recipes')
       .select(`
         *,
@@ -476,15 +665,21 @@ router.post('/:id/copy', requireAuth, async (req, res) => {
         ),
         recipe_tags(tags(id))
       `)
-      .eq('id', id)
-      .single();
+      .eq('id', id);
 
-    if (fetchError || !originalRecipe) {
+    if (fetchError) {
+      console.error('Error fetching original recipe:', fetchError);
+      return res.status(500).json({ error: 'Failed to fetch recipe' });
+    }
+
+    if (!originalRecipes || originalRecipes.length === 0) {
       return res.status(404).json({ error: 'Recipe not found' });
     }
 
-    // Create new recipe
-    const { data: newRecipe, error: createError } = await supabase
+    const originalRecipe = originalRecipes[0];
+
+    // Create new recipe using user's token context
+    const { data: newRecipes, error: createError } = await userSupabase
       .from('recipes')
       .insert({
         user_id: req.user.id,
@@ -498,48 +693,55 @@ router.post('/:id/copy', requireAuth, async (req, res) => {
         image_url: originalRecipe.image_url,
         is_public: false // Copies are private by default
       })
-      .select()
-      .single();
+      .select();
 
     if (createError) {
       console.error('Error copying recipe:', createError);
       return res.status(400).json({ error: createError.message });
     }
 
-    // Copy ingredients
+    if (!newRecipes || newRecipes.length === 0) {
+      return res.status(400).json({ error: 'Failed to create recipe copy' });
+    }
+
+    const newRecipe = newRecipes[0];
+
+    // Copy ingredients using user's token context
     for (const recipeIngredient of originalRecipe.recipe_ingredients) {
-      let { data: ingredient } = await supabase
+      let { data: ingredients } = await userSupabase
         .from('ingredients')
         .select('id')
-        .eq('name', recipeIngredient.ingredients.name)
-        .single();
+        .eq('name', recipeIngredient.ingredients.name);
+
+      let ingredient = ingredients && ingredients.length > 0 ? ingredients[0] : null;
 
       if (!ingredient) {
-        const { data: newIngredient } = await supabase
+        const { data: newIngredients } = await userSupabase
           .from('ingredients')
           .insert({ 
             name: recipeIngredient.ingredients.name, 
             category: recipeIngredient.ingredients.category 
           })
-          .select('id')
-          .single();
-        ingredient = newIngredient;
+          .select('id');
+        ingredient = newIngredients && newIngredients.length > 0 ? newIngredients[0] : null;
       }
 
-      await supabase
-        .from('recipe_ingredients')
-        .insert({
-          recipe_id: newRecipe.id,
-          ingredient_id: ingredient.id,
-          quantity: recipeIngredient.quantity,
-          unit: recipeIngredient.unit,
-          notes: recipeIngredient.notes
-        });
+      if (ingredient) {
+        await userSupabase
+          .from('recipe_ingredients')
+          .insert({
+            recipe_id: newRecipe.id,
+            ingredient_id: ingredient.id,
+            quantity: recipeIngredient.quantity,
+            unit: recipeIngredient.unit,
+            notes: recipeIngredient.notes
+          });
+      }
     }
 
-    // Copy tags
+    // Copy tags using user's token context
     for (const recipeTag of originalRecipe.recipe_tags) {
-      await supabase
+      await userSupabase
         .from('recipe_tags')
         .insert({
           recipe_id: newRecipe.id,

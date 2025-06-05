@@ -6,7 +6,9 @@
     <title>Tag-a-Meal - Recipe Management</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
 </head>
 <body>
     <!-- Navigation -->
@@ -34,25 +36,34 @@
                     <i class="fas fa-book"></i>
                     <span>Recipes</span>
                 </button>
-                <button class="nav-item" data-page="my-recipes">
+                <button class="nav-item" data-page="my-recipes" data-auth-required>
                     <i class="fas fa-user-circle"></i>
                     <span>My Recipes</span>
                 </button>
-                <button class="nav-item" data-page="create-recipe">
+                <button class="nav-item" data-page="create-recipe" data-auth-required>
                     <i class="fas fa-plus"></i>
                     <span>Create</span>
                 </button>
                 <div class="nav-user">
-                    <button id="userMenuBtn" class="user-menu-btn">
-                        <img id="userAvatar" src="/api/placeholder-avatar" alt="User" class="user-avatar">
-                        <span id="userName">Guest</span>
-                        <i class="fas fa-chevron-down"></i>
+                    <!-- Sign In Button (shown when logged out) -->
+                    <button id="signInBtn" class="btn btn-primary" style="display: none;">
+                        <i class="fas fa-sign-in-alt"></i>
+                        Sign In
                     </button>
-                    <div id="userDropdown" class="user-dropdown">
-                        <a href="#" id="profileLink"><i class="fas fa-user"></i> Profile</a>
-                        <a href="#" id="settingsLink"><i class="fas fa-cog"></i> Settings</a>
-                        <hr>
-                        <a href="#" id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                    
+                    <!-- User Menu (shown when logged in) -->
+                    <div id="userMenuContainer" style="display: none;">
+                        <button id="userMenuBtn" class="user-menu-btn">
+                            <img id="userAvatar" src="/api/placeholder-avatar" alt="User" class="user-avatar">
+                            <span id="userName">Guest</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div id="userDropdown" class="user-dropdown">
+                            <a href="#" id="profileLink"><i class="fas fa-user"></i> Profile</a>
+                            <a href="#" id="settingsLink"><i class="fas fa-cog"></i> Settings</a>
+                            <hr>
+                            <a href="#" id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -75,13 +86,6 @@
             </div>
             
             <div class="container">
-                <section class="featured-section">
-                    <h2>Featured Recipes</h2>
-                    <div id="featuredRecipes" class="recipe-grid">
-                        <!-- Featured recipes will be loaded here -->
-                    </div>
-                </section>
-                
                 <section class="stats-section">
                     <div class="stats-grid">
                         <div class="stat-card">
@@ -247,6 +251,9 @@
                     
                     <div class="form-section">
                         <h3>Ingredients</h3>
+                        <datalist id="ingredientsDatalist">
+                            <!-- Ingredients will be populated here -->
+                        </datalist>
                         <div id="ingredientsList" class="ingredients-list">
                             <!-- Ingredients will be added here -->
                         </div>
@@ -257,7 +264,30 @@
                     
                     <div class="form-section">
                         <h3>Instructions *</h3>
-                        <textarea id="recipeInstructions" rows="8" required placeholder="Step-by-step cooking instructions..."></textarea>
+                        <div class="instructions-editor">
+                            <label for="recipeInstructions" style="font-weight: 500; margin-bottom: 0.5rem; display: block;">Write your instructions (Markdown supported)</label>
+                            <textarea id="recipeInstructions" rows="12" required placeholder="Step-by-step cooking instructions...
+
+You can use Markdown formatting:
+- **Bold text**
+- *Italic text*
+- # Headers
+- 1. Numbered lists
+- - Bullet points
+- [Links](http://example.com)
+
+Example:
+## Preparation
+1. **Preheat** oven to 350°F
+2. *Gently* mix ingredients
+3. Bake for 25-30 minutes" style="width: 100%; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 14px; line-height: 1.5; resize: vertical; min-height: 300px;"></textarea>
+                        </div>
+                        <div class="instructions-preview-section" style="margin-top: 1rem;">
+                            <label style="font-weight: 500; margin-bottom: 0.5rem; display: block;">Live Preview</label>
+                            <div id="instructionsPreview" class="instructions-preview-box" style="border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; min-height: 200px; background: var(--background-secondary); overflow-y: auto;">
+                                <div class="preview-placeholder" style="color: var(--text-secondary); font-style: italic; text-align: center; padding: 2rem;">Start typing above to see preview...</div>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="form-section">
@@ -298,9 +328,14 @@
                         <h3>Profile Information</h3>
                         <div class="profile-avatar">
                             <img id="profileAvatar" src="/api/placeholder-avatar" alt="Profile">
-                            <button type="button" id="changeAvatarBtn" class="btn btn-secondary">
-                                <i class="fas fa-camera"></i> Change Avatar
-                            </button>
+                            <div class="avatar-actions">
+                                <button type="button" id="changeAvatarBtn" class="btn btn-secondary">
+                                    <i class="fas fa-camera"></i> Change Avatar
+                                </button>
+                                <button type="button" id="removeAvatarBtn" class="btn btn-outline" style="display: none;">
+                                    <i class="fas fa-trash"></i> Remove Photo
+                                </button>
+                            </div>
                             <input type="file" id="avatarInput" accept="image/*" style="display: none;">
                         </div>
                         
@@ -311,7 +346,15 @@
                         
                         <div class="form-group">
                             <label for="profileEmail">Email</label>
-                            <input type="email" id="profileEmail" readonly>
+                            <input type="email" id="profileEmail" readonly disabled>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showAuthorName" checked>
+                                <span class="checkmark"></span>
+                                Show my name on recipes
+                            </label>
                         </div>
                     </div>
                     
@@ -357,6 +400,14 @@
                         </div>
                     </div>
                     
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="keepSignedIn" checked>
+                            <span class="checkmark"></span>
+                            Keep me signed in
+                        </label>
+                    </div>
+                    
                     <button type="submit" class="btn btn-primary btn-full">
                         <span id="authSubmitText">Sign In</span>
                     </button>
@@ -364,6 +415,106 @@
                 
                 <div class="auth-switch">
                     <p id="authSwitchText">Don't have an account? <a href="#" id="authSwitchLink">Sign up</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Email Verification Modal -->
+    <div id="emailVerificationModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Email Verification Required</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div style="text-align: center; padding: 1rem;">
+                    <i class="fas fa-envelope" style="font-size: 3rem; color: var(--primary-color); margin-bottom: 1rem;"></i>
+                    <h3>Check Your Email</h3>
+                    <p style="margin: 1rem 0; color: var(--text-secondary);">
+                        We've sent a verification link to <strong id="verificationEmail"></strong>
+                    </p>
+                    <p style="margin: 1rem 0; color: var(--text-secondary);">
+                        Please check your email and click the verification link to activate your account, then sign in again.
+                    </p>
+                    <div style="margin-top: 2rem;">
+                        <button class="btn btn-primary" id="signInAgainBtn">
+                            <i class="fas fa-sign-in-alt"></i> Sign In Again
+                        </button>
+                    </div>
+                    <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--text-secondary);">
+                        Didn't receive the email? Check your spam folder or contact support.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipe Detail Modal -->
+    <div id="recipeDetailModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="recipeDetailTitle">Recipe Details</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div id="recipeDetailContent" class="recipe-detail-modal">
+                    <!-- Recipe details will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sign Up Encouragement Modal -->
+    <div id="signUpEncouragementModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Join Tag-a-Meal to See Full Recipe Details</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div style="text-align: center; padding: 1rem;">
+                    <i class="fas fa-utensils" style="font-size: 3rem; color: var(--primary-color); margin-bottom: 1rem;"></i>
+                    <h3>Unlock the Full Recipe Experience</h3>
+                    <p style="margin: 1rem 0; color: var(--text-secondary);">
+                        Sign up for free to access complete recipe details including:
+                    </p>
+                    <div style="text-align: left; max-width: 300px; margin: 1.5rem auto;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0;">
+                            <i class="fas fa-check" style="color: var(--success-color);"></i>
+                            <span>Full ingredient lists with measurements</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0;">
+                            <i class="fas fa-check" style="color: var(--success-color);"></i>
+                            <span>Step-by-step cooking instructions</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0;">
+                            <i class="fas fa-check" style="color: var(--success-color);"></i>
+                            <span>Save and organize your favorite recipes</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0;">
+                            <i class="fas fa-check" style="color: var(--success-color);"></i>
+                            <span>Create and share your own recipes</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0;">
+                            <i class="fas fa-check" style="color: var(--success-color);"></i>
+                            <span>Copy and customize recipes from others</span>
+                        </div>
+                    </div>
+                    <div style="margin-top: 2rem;">
+                        <button class="btn btn-primary btn-full" id="signUpFromEncouragement" style="margin-bottom: 1rem;">
+                            <i class="fas fa-user-plus"></i> Sign Up Free
+                        </button>
+                        <button class="btn btn-secondary btn-full" id="signInFromEncouragement">
+                            <i class="fas fa-sign-in-alt"></i> Already Have an Account? Sign In
+                        </button>
+                    </div>
+                    <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--text-secondary);">
+                        Join thousands of home cooks sharing their favorite recipes!
+                    </p>
                 </div>
             </div>
         </div>

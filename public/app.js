@@ -9,6 +9,7 @@ class AppState {
         this.ingredients = [];
         this.currentRecipe = null;
         this.editingRecipe = null;
+        this.copyingRecipe = null;
     }
 
     setUser(user) {
@@ -31,23 +32,55 @@ class AppState {
         
         if (this.user) {
             userName.textContent = this.user.fullName || this.user.email;
-            userAvatar.src = this.user.avatarUrl || '/api/placeholder-avatar';
+            if (this.user.avatarUrl) {
+                userAvatar.src = this.user.avatarUrl;
+                userAvatar.style.display = 'block';
+                userAvatar.nextElementSibling?.remove(); // Remove any icon fallback
+            } else {
+                userAvatar.style.display = 'none';
+                // Add Material Icons fallback if not already present
+                if (!userAvatar.nextElementSibling || !userAvatar.nextElementSibling.classList.contains('material-icons')) {
+                    const iconFallback = document.createElement('span');
+                    iconFallback.className = 'material-icons user-avatar-fallback';
+                    iconFallback.textContent = 'account_circle';
+                    iconFallback.style.cssText = 'font-size: 32px; color: var(--text-secondary); border-radius: 50%;';
+                    userAvatar.parentNode.insertBefore(iconFallback, userAvatar.nextSibling);
+                }
+            }
             this.showAuthenticatedUI();
         } else {
             userName.textContent = 'Guest';
-            userAvatar.src = '/api/placeholder-avatar';
+            userAvatar.style.display = 'none';
+            // Add Material Icons fallback for guest
+            if (!userAvatar.nextElementSibling || !userAvatar.nextElementSibling.classList.contains('material-icons')) {
+                const iconFallback = document.createElement('span');
+                iconFallback.className = 'material-icons user-avatar-fallback';
+                iconFallback.textContent = 'account_circle';
+                iconFallback.style.cssText = 'font-size: 32px; color: var(--text-secondary); border-radius: 50%;';
+                userAvatar.parentNode.insertBefore(iconFallback, userAvatar.nextSibling);
+            }
             this.showGuestUI();
         }
     }
 
     showAuthenticatedUI() {
-        const authRequiredElements = document.querySelectorAll('[data-auth-required]');
-        authRequiredElements.forEach(el => el.style.display = 'block');
+        document.getElementById('signInBtn').style.display = 'none';
+        document.getElementById('userMenuContainer').style.display = 'block';
+        
+        // Show auth-required nav items
+        document.querySelectorAll('[data-auth-required]').forEach(el => {
+            el.style.display = 'flex';
+        });
     }
 
     showGuestUI() {
-        const authRequiredElements = document.querySelectorAll('[data-auth-required]');
-        authRequiredElements.forEach(el => el.style.display = 'none');
+        document.getElementById('signInBtn').style.display = 'block';
+        document.getElementById('userMenuContainer').style.display = 'none';
+        
+        // Hide auth-required nav items
+        document.querySelectorAll('[data-auth-required]').forEach(el => {
+            el.style.display = 'none';
+        });
     }
 }
 
@@ -294,14 +327,57 @@ function hideModal(modalId) {
     modal.classList.remove('active');
 }
 
-function navigateToPage(pageId) {
+function showSignUpEncouragementModal(context = 'create') {
+    const modal = document.getElementById('signUpEncouragementModal');
+    const title = modal.querySelector('.modal-header h2');
+    
+    if (context === 'recipe') {
+        title.textContent = 'Sign Up to View Full Recipe Details';
+    } else {
+        title.textContent = 'Join Tag-a-Meal to Create and Manage Recipes';
+    }
+    
+    showModal('signUpEncouragementModal');
+}
+
+function navigateToPage(pageId, skipUnsavedCheck = false) {
+    // Check if user is trying to access auth-required pages without being signed in
+    const authRequiredPages = ['my-recipes', 'create-recipe', 'profile'];
+    if (authRequiredPages.includes(pageId) && !app.user) {
+        showSignUpEncouragementModal('create');
+        return;
+    }
+
+    // Check if we're leaving the create-recipe page with unsaved changes
+    if (app.currentPage === 'create-recipe' && pageId !== 'create-recipe' && !skipUnsavedCheck) {
+        if (hasUnsavedChanges()) {
+            const confirmLeave = confirm('You have unsaved changes. Are you sure you want to leave this page?');
+            if (!confirmLeave) {
+                return; // Don't navigate away
+            }
+        }
+        // Clear editing state when leaving create-recipe page
+        clearEditingState();
+    }
+
     // Hide all pages
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
     });
 
-    // Show target page
-    const targetPage = document.getElementById(pageId + 'Page');
+    // Convert kebab-case to camelCase for page IDs
+    const pageIdMap = {
+        'home': 'homePage',
+        'recipes': 'recipesPage',
+        'my-recipes': 'myRecipesPage',
+        'create-recipe': 'createRecipePage',
+        'recipe-detail': 'recipeDetailPage',
+        'profile': 'profilePage'
+    };
+
+    const targetPageId = pageIdMap[pageId] || pageId + 'Page';
+    const targetPage = document.getElementById(targetPageId);
+    
     if (targetPage) {
         targetPage.classList.add('active');
         app.currentPage = pageId;
@@ -318,7 +394,75 @@ function navigateToPage(pageId) {
 
         // Load page data
         loadPageData(pageId);
+    } else {
+        console.error(`Page not found: ${targetPageId} for pageId: ${pageId}`);
     }
+}
+
+function hasUnsavedChanges() {
+    // Check if any form fields have been modified
+    const form = document.getElementById('recipeForm');
+    if (!form) return false;
+
+    const title = document.getElementById('recipeTitle').value.trim();
+    const description = document.getElementById('recipeDescription').value.trim();
+    const instructions = document.getElementById('recipeInstructions').value.trim();
+    
+    // Check if there are any ingredients
+    const ingredients = document.querySelectorAll('.ingredient-item');
+    const hasIngredients = Array.from(ingredients).some(item => {
+        const name = item.querySelector('.ingredient-name').value.trim();
+        return name.length > 0;
+    });
+
+    // Consider it unsaved if there's any content
+    return title.length > 0 || description.length > 0 || instructions.length > 0 || hasIngredients;
+}
+
+function clearEditingState() {
+    // Clear the editing recipe state
+    app.editingRecipe = null;
+    
+    // Reset form title
+    document.getElementById('recipeFormTitle').textContent = 'Create New Recipe';
+    
+    // Reset form
+    const form = document.getElementById('recipeForm');
+    if (form) {
+        form.reset();
+    }
+    
+    // Clear ingredients list
+    const ingredientsList = document.getElementById('ingredientsList');
+    if (ingredientsList) {
+        ingredientsList.innerHTML = '';
+        addIngredientRow(); // Add one empty row
+    }
+    
+    // Clear image preview
+    const imagePreview = document.getElementById('imagePreview');
+    if (imagePreview) {
+        imagePreview.innerHTML = `
+            <button type="button" id="uploadImageBtn" class="upload-btn">
+                <i class="fas fa-camera"></i>
+                <span>Upload Image</span>
+            </button>
+        `;
+        
+        // Re-attach event listener
+        const uploadBtn = document.getElementById('uploadImageBtn');
+        if (uploadBtn) {
+            uploadBtn.addEventListener('click', () => {
+                document.getElementById('recipeImage').click();
+            });
+        }
+    }
+    
+    // Clear tag selections
+    const tagCheckboxes = document.querySelectorAll('input[name="recipeTags"]');
+    tagCheckboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
 }
 
 async function loadPageData(pageId) {
@@ -349,17 +493,16 @@ async function loadPageData(pageId) {
 // Page Loaders
 async function loadHomePage() {
     try {
-        // Load featured recipes
-        const recipesData = await api.getRecipes({ limit: 6 });
-        renderRecipeGrid(recipesData.recipes, 'featuredRecipes');
-
-        // Load stats (mock data for now)
+        // Load public recipe count for front page
+        const recipesData = await api.getRecipes({ limit: 1, publicOnly: true });
         document.getElementById('totalRecipes').textContent = recipesData.pagination?.total || '0';
         document.getElementById('totalUsers').textContent = '1,234';
         document.getElementById('totalTags').textContent = '45';
         document.getElementById('totalIngredients').textContent = '567';
     } catch (error) {
         console.error('Error loading home page:', error);
+        // Fallback to 0 if there's an error
+        document.getElementById('totalRecipes').textContent = '0';
     }
 }
 
@@ -407,15 +550,17 @@ async function loadCreateRecipePage() {
         app.ingredients = ingredientsData.ingredients;
         
         renderRecipeTagsForm();
+        renderIngredientsDatalist();
         
-        // Reset form if not editing
-        if (!app.editingRecipe) {
+        // Reset form if not editing or copying
+        if (!app.editingRecipe && !app.copyingRecipe) {
             document.getElementById('recipeForm').reset();
             document.getElementById('recipeFormTitle').textContent = 'Create New Recipe';
             clearIngredientsList();
         }
     } catch (error) {
         console.error('Error loading create recipe page:', error);
+        showToast('Failed to load form data', 'error');
     }
 }
 
@@ -431,24 +576,92 @@ async function loadProfilePage() {
         
         document.getElementById('profileFullName').value = user.fullName || '';
         document.getElementById('profileEmail').value = user.email || '';
-        document.getElementById('profileAvatar').src = user.avatarUrl || '/api/placeholder-avatar';
+        
+        // Fix profile avatar display
+        const profileAvatar = document.getElementById('profileAvatar');
+        const avatarContainer = profileAvatar?.parentElement;
+        const removeAvatarBtn = document.getElementById('removeAvatarBtn');
+        
+        if (profileAvatar && avatarContainer) {
+            if (user.avatarUrl) {
+                profileAvatar.src = user.avatarUrl;
+                profileAvatar.style.display = 'block';
+                // Show remove button
+                if (removeAvatarBtn) {
+                    removeAvatarBtn.style.display = 'inline-block';
+                }
+                // Remove any Material Icons fallback
+                const existingIcon = avatarContainer.querySelector('.material-icons');
+                if (existingIcon) {
+                    existingIcon.remove();
+                }
+            } else {
+                profileAvatar.style.display = 'none';
+                // Hide remove button
+                if (removeAvatarBtn) {
+                    removeAvatarBtn.style.display = 'none';
+                }
+                // Add Material Icons fallback if not already present
+                let iconFallback = avatarContainer.querySelector('.material-icons');
+                if (!iconFallback) {
+                    iconFallback = document.createElement('span');
+                    iconFallback.className = 'material-icons profile-avatar-fallback';
+                    iconFallback.textContent = 'account_circle';
+                    iconFallback.style.cssText = 'font-size: 120px; color: var(--text-secondary); width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--background-secondary);';
+                    avatarContainer.insertBefore(iconFallback, profileAvatar.nextSibling);
+                }
+            }
+        }
+        
+        document.getElementById('showAuthorName').checked = user.showAuthorName !== false;
     } catch (error) {
         console.error('Error loading profile page:', error);
     }
 }
 
 // Render Functions
-function renderRecipeGrid(recipes, containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    if (!recipes || recipes.length === 0) {
-        container.innerHTML = '<p class="text-center">No recipes found.</p>';
-        return;
+function renderRecipeCard(recipe, isMyRecipes = false) {
+    const isOwner = app.user && app.user.id === recipe.user_id;
+    
+    // Get author name - for My Recipes, show current user's name, otherwise show recipe author
+    let authorName;
+    let authorAvatar;
+    
+    if (isMyRecipes && isOwner) {
+        // For My Recipes page, show current user's info
+        authorName = app.user?.fullName || app.user?.email || 'You';
+        authorAvatar = app.user?.avatarUrl;
+    } else {
+        // For public recipes or other users' recipes
+        authorName = recipe.users?.full_name || recipe.user?.full_name || 'Anonymous';
+        authorAvatar = recipe.users?.avatar_url;
+        
+        // Only show author info if they allow name display
+        if (recipe.users?.show_author_name === false) {
+            authorName = 'Anonymous';
+            authorAvatar = null;
+        }
     }
-
-    container.innerHTML = recipes.map(recipe => `
-        <div class="recipe-card" onclick="viewRecipe('${recipe.id}')">
+    
+    // Determine badge type
+    let badgeClass = '';
+    let badgeText = '';
+    if (isOwner) {
+        if (recipe.is_public) {
+            badgeClass = 'public';
+            badgeText = 'PUBLIC';
+        } else {
+            badgeClass = 'private';
+            badgeText = 'PRIVATE';
+        }
+    } else {
+        badgeClass = 'other-user';
+        badgeText = 'SHARED';
+    }
+    
+    return `
+        <div class="recipe-card" data-recipe-id="${recipe.id}">
+            <div class="recipe-badge ${badgeClass}">${badgeText}</div>
             <img src="${recipe.image_url || '/api/placeholder-recipe'}" alt="${recipe.title}" class="recipe-image">
             <div class="recipe-content">
                 <h3 class="recipe-title">${recipe.title}</h3>
@@ -460,23 +673,78 @@ function renderRecipeGrid(recipes, containerId) {
                 </div>
                 <div class="recipe-tags">
                     ${(recipe.recipe_tags || []).map(rt => 
-                        `<span class="tag" style="background-color: ${rt.tags.color}">${rt.tags.name}</span>`
+                        `<span class="tag" style="background-color: ${rt.tags?.color || '#3B82F6'}">${rt.tags?.name || rt.tag_name || ''}</span>`
                     ).join('')}
                 </div>
                 <div class="recipe-footer">
                     <div class="recipe-author">
-                        <img src="${recipe.users?.avatar_url || '/api/placeholder-avatar'}" alt="Author" class="author-avatar">
-                        <span>${recipe.users?.full_name || 'Anonymous'}</span>
+                        ${authorAvatar ? 
+                            `<img src="${authorAvatar}" alt="" class="author-avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                             <span class="material-icons author-avatar-icon" style="font-size: 24px; color: var(--text-secondary); width: 24px; height: 24px; display: none; align-items: center; justify-content: center; border-radius: 50%; background: var(--background-secondary);">account_circle</span>` : 
+                            `<span class="material-icons author-avatar-icon" style="font-size: 24px; color: var(--text-secondary); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--background-secondary);">account_circle</span>`
+                        }
+                        <span>${authorName}</span>
                     </div>
-                    <div class="recipe-rating">
-                        <i class="fas fa-star"></i>
-                        <span>${recipe.averageRating?.toFixed(1) || '0.0'}</span>
-                        <span>(${recipe.totalRatings || 0})</span>
+                    <div class="recipe-actions">
+                        ${isMyRecipes && isOwner ? `
+                            <button class="btn btn-sm btn-primary recipe-edit-btn" data-recipe-id="${recipe.id}">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                        ` : (!isOwner && app.user) ? `
+                            <button class="btn btn-sm btn-secondary recipe-copy-btn" data-recipe-id="${recipe.id}">
+                                <i class="fas fa-copy"></i> Copy
+                            </button>
+                        ` : ''}
+                        <div class="recipe-rating">
+                            <i class="fas fa-star"></i>
+                            <span>${recipe.averageRating?.toFixed(1) || '0.0'}</span>
+                            <span>(${recipe.totalRatings || 0})</span>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    `).join('');
+    `;
+}
+
+function renderRecipeGrid(recipes, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!recipes || recipes.length === 0) {
+        container.innerHTML = '<p class="text-center">No recipes found.</p>';
+        return;
+    }
+
+    const isMyRecipes = containerId === 'myRecipesGrid';
+
+    // Use shared recipe card rendering function
+    container.innerHTML = recipes.map(recipe => renderRecipeCard(recipe, isMyRecipes)).join('');
+
+    // Add event listeners for recipe cards
+    container.querySelectorAll('.recipe-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+            const recipeId = card.dataset.recipeId;
+            viewRecipe(recipeId);
+        });
+    });
+
+    // Add event listeners for action buttons
+    container.querySelectorAll('.recipe-edit-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const recipeId = btn.dataset.recipeId;
+            editRecipe(recipeId);
+        });
+    });
+
+    container.querySelectorAll('.recipe-copy-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const recipeId = btn.dataset.recipeId;
+            copyAndEditRecipe(recipeId);
+        });
+    });
 }
 
 function renderTagFilters(tags) {
@@ -510,13 +778,26 @@ function renderRecipeTagsForm() {
     `).join('');
 }
 
+function renderIngredientsDatalist() {
+    const datalist = document.getElementById('ingredientsDatalist');
+    if (!datalist) return;
+
+    datalist.innerHTML = app.ingredients.map(ingredient => `
+        <option value="${ingredient.name}">
+    `).join('');
+}
+
 function addIngredientRow() {
     const container = document.getElementById('ingredientsList');
     const row = document.createElement('div');
     row.className = 'ingredient-item';
+    
+    // Check if this is the first ingredient
+    const isFirstIngredient = container.children.length === 0;
+    
     row.innerHTML = `
         <div class="form-group">
-            <input type="text" placeholder="Ingredient name" class="ingredient-name" list="ingredientsList">
+            <input type="text" placeholder="Ingredient name" class="ingredient-name" list="ingredientsDatalist" ${isFirstIngredient ? 'required' : ''}>
         </div>
         <div class="form-group">
             <input type="number" placeholder="Quantity" class="ingredient-quantity" step="0.01">
@@ -527,15 +808,52 @@ function addIngredientRow() {
         <div class="form-group">
             <input type="text" placeholder="Notes" class="ingredient-notes">
         </div>
-        <button type="button" class="ingredient-remove" onclick="removeIngredientRow(this)">
-            <i class="fas fa-trash"></i>
+        <button type="button" class="ingredient-remove" ${isFirstIngredient ? 'style="display: none;"' : ''}>
+            <span class="material-icons">close</span>
         </button>
     `;
     container.appendChild(row);
+    
+    // Add event listener to the remove button
+    const removeBtn = row.querySelector('.ingredient-remove');
+    removeBtn.addEventListener('click', () => {
+        removeIngredientRow(removeBtn);
+    });
+    
+    // Update remove button visibility for all ingredients
+    updateIngredientRemoveButtons();
 }
 
 function removeIngredientRow(button) {
     button.closest('.ingredient-item').remove();
+    updateIngredientRemoveButtons();
+}
+
+function updateIngredientRemoveButtons() {
+    const container = document.getElementById('ingredientsList');
+    const ingredients = container.querySelectorAll('.ingredient-item');
+    
+    ingredients.forEach((ingredient, index) => {
+        const removeBtn = ingredient.querySelector('.ingredient-remove');
+        if (removeBtn) {
+            // Hide remove button for first ingredient, show for others
+            if (index === 0) {
+                removeBtn.style.display = 'none';
+            } else {
+                removeBtn.style.display = 'block';
+            }
+        }
+        
+        // Make first ingredient required
+        const nameInput = ingredient.querySelector('.ingredient-name');
+        if (nameInput) {
+            if (index === 0) {
+                nameInput.setAttribute('required', '');
+            } else {
+                nameInput.removeAttribute('required');
+            }
+        }
+    });
 }
 
 function clearIngredientsList() {
@@ -569,20 +887,106 @@ async function handleAuth(event) {
             response = await api.register(email, password, fullName);
         }
         
-        app.setToken(response.session.access_token);
-        app.setUser(response.user);
+        // Check if email verification is required
+        if (!isLogin && (!response.session || response.session === null)) {
+            // Registration successful but email verification required
+            hideModal('authModal');
+            showEmailVerificationModal(email);
+            return;
+        }
         
-        hideModal('authModal');
-        showToast(`${isLogin ? 'Login' : 'Registration'} successful!`, 'success');
-        
-        // Reload current page if auth was required
-        if (['my-recipes', 'create-recipe', 'profile'].includes(app.currentPage)) {
-            loadPageData(app.currentPage);
+        // Normal login/registration flow
+        if (response.session && response.session.access_token) {
+            app.setToken(response.session.access_token);
+            app.setUser(response.user);
+            
+            hideModal('authModal');
+            showToast(`${isLogin ? 'Login' : 'Registration'} successful!`, 'success');
+            
+            // Reload current page if auth was required or if viewing recipes
+            if (['my-recipes', 'create-recipe', 'profile', 'recipes'].includes(app.currentPage)) {
+                loadPageData(app.currentPage);
+            }
+        } else {
+            // Handle case where session is null but no error was thrown
+            if (!isLogin) {
+                hideModal('authModal');
+                showEmailVerificationModal(email);
+            } else {
+                showToast('Login failed. Please check your credentials.', 'error');
+            }
         }
         
     } catch (error) {
-        showToast(error.message, 'error');
+        // Check for specific error types
+        if (error.message.includes('duplicate key value violates unique constraint') || 
+            error.message.includes('already exists') ||
+            error.message.includes('users_email_key')) {
+            showToast('An account with this email already exists. Please sign in instead.', 'error');
+        } else if (error.message.includes('email') && error.message.includes('confirm') || 
+                   error.message.includes('verification') || 
+                   error.message.includes('verify')) {
+            hideModal('authModal');
+            showEmailVerificationModal(email);
+        } else {
+            showToast(error.message, 'error');
+        }
     }
+}
+
+function showEmailVerificationModal(email) {
+    // Set the email in the verification modal
+    document.getElementById('verificationEmail').textContent = email;
+    
+    // Clear the auth form
+    document.getElementById('authForm').reset();
+    
+    // Reset auth modal to login mode
+    const registerFields = document.getElementById('registerFields');
+    const authModalTitle = document.getElementById('authModalTitle');
+    const authSubmitText = document.getElementById('authSubmitText');
+    const authSwitchText = document.getElementById('authSwitchText');
+    
+    registerFields.style.display = 'none';
+    authModalTitle.textContent = 'Sign In';
+    authSubmitText.textContent = 'Sign In';
+    authSwitchText.innerHTML = 'Don\'t have an account? <a href="#" id="authSwitchLink">Sign up</a>';
+    
+    // Re-attach event listener to new switch link
+    const newSwitchLink = document.getElementById('authSwitchLink');
+    if (newSwitchLink) {
+        newSwitchLink.addEventListener('click', handleAuthModeSwitch);
+    }
+    
+    // Show verification modal
+    showModal('emailVerificationModal');
+}
+
+function handleAuthModeSwitch(e) {
+    e.preventDefault();
+    const registerFields = document.getElementById('registerFields');
+    const authModalTitle = document.getElementById('authModalTitle');
+    const authSubmitText = document.getElementById('authSubmitText');
+    const authSwitchText = document.getElementById('authSwitchText');
+    
+    const isLogin = registerFields.style.display === 'none' || !registerFields.style.display;
+    
+    if (isLogin) {
+        // Switch to register
+        registerFields.style.display = 'block';
+        authModalTitle.textContent = 'Sign Up';
+        authSubmitText.textContent = 'Sign Up';
+        authSwitchText.innerHTML = 'Already have an account? <a href="#" id="authSwitchLink">Sign in</a>';
+    } else {
+        // Switch to login
+        registerFields.style.display = 'none';
+        authModalTitle.textContent = 'Sign In';
+        authSubmitText.textContent = 'Sign In';
+        authSwitchText.innerHTML = 'Don\'t have an account? <a href="#" id="authSwitchLink">Sign up</a>';
+    }
+    
+    // Re-attach event listener to new link
+    document.getElementById('authSwitchLink').addEventListener('click', handleAuthModeSwitch);
 }
 
 async function handleLogout() {
@@ -658,7 +1062,8 @@ async function handleRecipeSubmit(event) {
         }
         
         app.editingRecipe = null;
-        navigateToPage('my-recipes');
+        app.copyingRecipe = null; // Clear copying flag
+        navigateToPage('my-recipes', true); // Skip unsaved changes check when saving
         
     } catch (error) {
         showToast(error.message, 'error');
@@ -676,10 +1081,16 @@ async function handleImageUpload(event) {
         const preview = document.getElementById('imagePreview');
         preview.innerHTML = `
             <img src="${response.imageUrl}" alt="Recipe preview" style="max-width: 100%; height: 200px; object-fit: cover; border-radius: 8px;" data-url="${response.imageUrl}">
-            <button type="button" onclick="removeImage()" class="btn btn-secondary" style="margin-top: 1rem;">
+            <button type="button" class="btn btn-secondary remove-image-btn" style="margin-top: 1rem;">
                 <i class="fas fa-trash"></i> Remove Image
             </button>
         `;
+        
+        // Add event listener to remove button
+        const removeBtn = preview.querySelector('.remove-image-btn');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', removeImage);
+        }
         
         showToast('Image uploaded successfully!', 'success');
     } catch (error) {
@@ -703,11 +1114,18 @@ function removeImage() {
 }
 
 async function viewRecipe(recipeId) {
+    // Check if user is signed in
+    if (!app.user) {
+        // Show encouragement modal for signed-out users with recipe-specific title
+        showSignUpEncouragementModal('recipe');
+        return;
+    }
+    
     try {
         const recipe = await api.getRecipe(recipeId);
         app.currentRecipe = recipe;
-        renderRecipeDetail(recipe);
-        navigateToPage('recipe-detail');
+        renderRecipeDetailModal(recipe);
+        showModal('recipeDetailModal');
     } catch (error) {
         showToast('Failed to load recipe', 'error');
     }
@@ -781,10 +1199,193 @@ function renderRecipeDetail(recipe) {
             
             <div class="instructions-section">
                 <h3>Instructions</h3>
-                <div class="instructions-text">${recipe.instructions}</div>
+                <div class="instructions-text">${marked.parse(recipe.instructions)}</div>
             </div>
         </div>
     `;
+}
+
+function renderRecipeDetailModal(recipe) {
+    const container = document.getElementById('recipeDetailContent');
+    const titleElement = document.getElementById('recipeDetailTitle');
+    
+    titleElement.textContent = recipe.title;
+    
+    // Get author info with privacy handling
+    let authorName = 'Anonymous';
+    let authorAvatar = null;
+    
+    if (recipe.users) {
+        if (recipe.users.show_author_name !== false) {
+            authorName = recipe.users.full_name || 'Anonymous';
+            authorAvatar = recipe.users.avatar_url;
+        }
+    }
+    
+    container.innerHTML = `
+        <div class="recipe-header">
+            <img src="${recipe.image_url || '/api/placeholder-recipe'}" alt="${recipe.title}" class="recipe-detail-image">
+            <p class="recipe-description">${recipe.description || ''}</p>
+            
+            <div class="recipe-author-info" style="display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0; padding: 1rem; background: var(--background-secondary); border-radius: 8px;">
+                ${authorAvatar ? 
+                    `<img src="${authorAvatar}" alt="" class="author-avatar" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                     <span class="material-icons" style="font-size: 48px; color: var(--text-secondary); width: 48px; height: 48px; display: none; align-items: center; justify-content: center; border-radius: 50%; background: var(--background-tertiary);">account_circle</span>` : 
+                    `<span class="material-icons" style="font-size: 48px; color: var(--text-secondary); width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--background-tertiary);">account_circle</span>`
+                }
+                <div>
+                    <div style="font-weight: 600; color: var(--text-primary);">Recipe by ${authorName}</div>
+                    <div style="font-size: 0.875rem; color: var(--text-secondary);">Created ${new Date(recipe.created_at).toLocaleDateString()}</div>
+                </div>
+            </div>
+            
+            <div class="recipe-detail-meta">
+                <div class="meta-item">
+                    <i class="fas fa-clock"></i>
+                    <span>Prep: ${recipe.prep_time || 0} min</span>
+                </div>
+                <div class="meta-item">
+                    <i class="fas fa-fire"></i>
+                    <span>Cook: ${recipe.cook_time || 0} min</span>
+                </div>
+                <div class="meta-item">
+                    <i class="fas fa-users"></i>
+                    <span>${recipe.servings || 1} servings</span>
+                </div>
+                <div class="meta-item">
+                    <i class="fas fa-signal"></i>
+                    <span>${recipe.difficulty || 'easy'}</span>
+                </div>
+                <div class="meta-item">
+                    <i class="fas fa-star"></i>
+                    <span>${recipe.averageRating?.toFixed(1) || '0.0'} (${recipe.totalRatings || 0} reviews)</span>
+                </div>
+            </div>
+            
+            <div class="recipe-tags">
+                ${(recipe.recipe_tags || []).map(rt => 
+                    `<span class="tag" style="background-color: ${rt.tags?.color || '#3B82F6'}">${rt.tags?.name || ''}</span>`
+                ).join('')}
+            </div>
+            
+            <div class="recipe-actions" style="margin-top: 1rem; text-align: center;">
+                ${app.user && app.user.id === recipe.user_id ? `
+                    <button class="btn btn-primary modal-edit-btn" data-recipe-id="${recipe.id}">
+                        <i class="fas fa-edit"></i> Edit Recipe
+                    </button>
+                    <button class="btn btn-secondary modal-copy-btn" data-recipe-id="${recipe.id}">
+                        <i class="fas fa-copy"></i> Copy Recipe
+                    </button>
+                ` : app.user ? `
+                    <button class="btn btn-secondary modal-copy-edit-btn" data-recipe-id="${recipe.id}">
+                        <i class="fas fa-copy"></i> Copy & Edit
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+        
+        <div class="recipe-detail-content">
+            <div class="ingredients-section">
+                <h3>Ingredients</h3>
+                <ul class="ingredient-list">
+                    ${(recipe.recipe_ingredients || []).map(ri => `
+                        <li>
+                            <span>${ri.ingredients.name}</span>
+                            <span>${ri.quantity || ''} ${ri.unit || ''}</span>
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+            
+            <div class="instructions-section">
+                <h3>Instructions</h3>
+                <div class="instructions-text">${marked.parse(recipe.instructions)}</div>
+            </div>
+        </div>
+    `;
+
+    // Add event listeners for modal action buttons
+    container.querySelectorAll('.modal-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            hideModal('recipeDetailModal');
+            editRecipe(btn.dataset.recipeId);
+        });
+    });
+
+    container.querySelectorAll('.modal-copy-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            hideModal('recipeDetailModal');
+            copyRecipe(btn.dataset.recipeId);
+        });
+    });
+
+    container.querySelectorAll('.modal-copy-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            hideModal('recipeDetailModal');
+            copyAndEditRecipe(btn.dataset.recipeId);
+        });
+    });
+}
+
+function populateRecipeForm(recipe, options = {}) {
+    const {
+        title = recipe.title,
+        formTitle = 'Edit Recipe',
+        isPublic = recipe.is_public
+    } = options;
+    
+    // Populate basic form fields
+    document.getElementById('recipeFormTitle').textContent = formTitle;
+    document.getElementById('recipeTitle').value = title;
+    document.getElementById('recipeDescription').value = recipe.description || '';
+    document.getElementById('recipeInstructions').value = recipe.instructions;
+    document.getElementById('recipePrepTime').value = recipe.prep_time || '';
+    document.getElementById('recipeCookTime').value = recipe.cook_time || '';
+    document.getElementById('recipeServings').value = recipe.servings || '';
+    document.getElementById('recipeDifficulty').value = recipe.difficulty || 'easy';
+    document.getElementById('recipePublic').value = isPublic ? 'true' : 'false';
+    
+    // Update preview with loaded instructions
+    updateInstructionsPreview();
+    
+    // Populate ingredients
+    document.getElementById('ingredientsList').innerHTML = '';
+    recipe.recipe_ingredients.forEach((ri, index) => {
+        addIngredientRow();
+        const lastRow = document.querySelector('.ingredient-item:last-child');
+        lastRow.querySelector('.ingredient-name').value = ri.ingredients.name;
+        lastRow.querySelector('.ingredient-quantity').value = ri.quantity || '';
+        lastRow.querySelector('.ingredient-unit').value = ri.unit || '';
+        lastRow.querySelector('.ingredient-notes').value = ri.notes || '';
+    });
+    
+    // Ensure at least one ingredient row exists
+    if (recipe.recipe_ingredients.length === 0) {
+        addIngredientRow();
+    }
+    
+    // Populate tags
+    recipe.recipe_tags.forEach(rt => {
+        const checkbox = document.querySelector(`input[value="${rt.tags.id}"]`);
+        if (checkbox) checkbox.checked = true;
+    });
+    
+    // Populate image
+    if (recipe.image_url) {
+        const preview = document.getElementById('imagePreview');
+        preview.innerHTML = `
+            <img src="${recipe.image_url}" alt="Recipe preview" style="max-width: 100%; height: 200px; object-fit: cover; border-radius: 8px;" data-url="${recipe.image_url}">
+            <button type="button" class="btn btn-secondary remove-image-btn" style="margin-top: 1rem;">
+                <i class="fas fa-trash"></i> Remove Image
+            </button>
+        `;
+        
+        // Add event listener to remove button
+        const removeBtn = preview.querySelector('.remove-image-btn');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', removeImage);
+        }
+    }
 }
 
 async function editRecipe(recipeId) {
@@ -792,44 +1393,10 @@ async function editRecipe(recipeId) {
         const recipe = await api.getRecipe(recipeId);
         app.editingRecipe = recipe;
         
-        // Populate form
-        document.getElementById('recipeFormTitle').textContent = 'Edit Recipe';
-        document.getElementById('recipeTitle').value = recipe.title;
-        document.getElementById('recipeDescription').value = recipe.description || '';
-        document.getElementById('recipeInstructions').value = recipe.instructions;
-        document.getElementById('recipePrepTime').value = recipe.prep_time || '';
-        document.getElementById('recipeCookTime').value = recipe.cook_time || '';
-        document.getElementById('recipeServings').value = recipe.servings || '';
-        document.getElementById('recipeDifficulty').value = recipe.difficulty || 'easy';
-        document.getElementById('recipePublic').value = recipe.is_public ? 'true' : 'false';
-        
-        // Populate ingredients
-        clearIngredientsList();
-        recipe.recipe_ingredients.forEach(ri => {
-            addIngredientRow();
-            const lastRow = document.querySelector('.ingredient-item:last-child');
-            lastRow.querySelector('.ingredient-name').value = ri.ingredients.name;
-            lastRow.querySelector('.ingredient-quantity').value = ri.quantity || '';
-            lastRow.querySelector('.ingredient-unit').value = ri.unit || '';
-            lastRow.querySelector('.ingredient-notes').value = ri.notes || '';
+        populateRecipeForm(recipe, {
+            formTitle: 'Edit Recipe',
+            isPublic: recipe.is_public
         });
-        
-        // Populate tags
-        recipe.recipe_tags.forEach(rt => {
-            const checkbox = document.querySelector(`input[value="${rt.tags.id}"]`);
-            if (checkbox) checkbox.checked = true;
-        });
-        
-        // Populate image
-        if (recipe.image_url) {
-            const preview = document.getElementById('imagePreview');
-            preview.innerHTML = `
-                <img src="${recipe.image_url}" alt="Recipe preview" style="max-width: 100%; height: 200px; object-fit: cover; border-radius: 8px;" data-url="${recipe.image_url}">
-                <button type="button" onclick="removeImage()" class="btn btn-secondary" style="margin-top: 1rem;">
-                    <i class="fas fa-trash"></i> Remove Image
-                </button>
-            `;
-        }
         
         navigateToPage('create-recipe');
     } catch (error) {
@@ -844,6 +1411,27 @@ async function copyRecipe(recipeId) {
         navigateToPage('my-recipes');
     } catch (error) {
         showToast('Failed to copy recipe', 'error');
+    }
+}
+
+async function copyAndEditRecipe(recipeId) {
+    try {
+        const recipe = await api.getRecipe(recipeId);
+        
+        // Set up for editing a copy
+        app.editingRecipe = null; // Clear editing state to create new recipe
+        app.copyingRecipe = recipe; // Set copying flag to prevent form reset
+        
+        populateRecipeForm(recipe, {
+            title: `${recipe.title} (Copy)`,
+            formTitle: 'Create Recipe (Copy)',
+            isPublic: false // Copies are private by default
+        });
+        
+        navigateToPage('create-recipe');
+        showToast('Recipe copied for editing!', 'success');
+    } catch (error) {
+        showToast('Failed to copy recipe for editing', 'error');
     }
 }
 
@@ -993,27 +1581,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Auth form submission
     authForm.addEventListener('submit', handleAuth);
     
-    // Auth mode switching
-    authSwitchLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        const isLogin = registerFields.style.display === 'none' || !registerFields.style.display;
-        
-        if (isLogin) {
-            // Switch to register
-            registerFields.style.display = 'block';
-            authModalTitle.textContent = 'Sign Up';
-            authSubmitText.textContent = 'Sign Up';
-            authSwitchText.innerHTML = 'Already have an account? <a href="#" id="authSwitchLink">Sign in</a>';
-        } else {
-            // Switch to login
-            registerFields.style.display = 'none';
-            authModalTitle.textContent = 'Sign In';
-            authSubmitText.textContent = 'Sign In';
-            authSwitchText.innerHTML = 'Don\'t have an account? <a href="#" id="authSwitchLink">Sign up</a>';
+    // Auth mode switching - use event delegation
+    authSwitchText.addEventListener('click', (e) => {
+        if (e.target.id === 'authSwitchLink') {
+            e.preventDefault();
+            const isLogin = registerFields.style.display === 'none' || !registerFields.style.display;
+            
+            if (isLogin) {
+                // Switch to register
+                registerFields.style.display = 'block';
+                authModalTitle.textContent = 'Sign Up';
+                authSubmitText.textContent = 'Sign Up';
+                authSwitchText.innerHTML = 'Already have an account? <a href="#" id="authSwitchLink">Sign in</a>';
+            } else {
+                // Switch to login
+                registerFields.style.display = 'none';
+                authModalTitle.textContent = 'Sign In';
+                authSubmitText.textContent = 'Sign In';
+                authSwitchText.innerHTML = 'Don\'t have an account? <a href="#" id="authSwitchLink">Sign up</a>';
+            }
         }
-        
-        // Re-attach event listener to new link
-        document.getElementById('authSwitchLink').addEventListener('click', arguments.callee);
     });
     
     // Modal close handlers
@@ -1059,6 +1646,62 @@ document.addEventListener('DOMContentLoaded', async () => {
         userDropdown.style.display = 'none';
     });
     
+    // Sign In button
+    document.getElementById('signInBtn').addEventListener('click', () => {
+        showModal('authModal');
+    });
+    
+    // Sign Up Encouragement Modal buttons
+    const signUpFromEncouragement = document.getElementById('signUpFromEncouragement');
+    const signInFromEncouragement = document.getElementById('signInFromEncouragement');
+    
+    if (signUpFromEncouragement) {
+        signUpFromEncouragement.addEventListener('click', () => {
+            hideModal('signUpEncouragementModal');
+            
+            // Switch auth modal to register mode
+            const registerFields = document.getElementById('registerFields');
+            const authModalTitle = document.getElementById('authModalTitle');
+            const authSubmitText = document.getElementById('authSubmitText');
+            const authSwitchText = document.getElementById('authSwitchText');
+            
+            registerFields.style.display = 'block';
+            authModalTitle.textContent = 'Sign Up';
+            authSubmitText.textContent = 'Sign Up';
+            authSwitchText.innerHTML = 'Already have an account? <a href="#" id="authSwitchLink">Sign in</a>';
+            
+            showModal('authModal');
+        });
+    }
+    
+    if (signInFromEncouragement) {
+        signInFromEncouragement.addEventListener('click', () => {
+            hideModal('signUpEncouragementModal');
+            
+            // Switch auth modal to login mode
+            const registerFields = document.getElementById('registerFields');
+            const authModalTitle = document.getElementById('authModalTitle');
+            const authSubmitText = document.getElementById('authSubmitText');
+            const authSwitchText = document.getElementById('authSwitchText');
+            
+            registerFields.style.display = 'none';
+            authModalTitle.textContent = 'Sign In';
+            authSubmitText.textContent = 'Sign In';
+            authSwitchText.innerHTML = 'Don\'t have an account? <a href="#" id="authSwitchLink">Sign up</a>';
+            
+            showModal('authModal');
+        });
+    }
+    
+    // Sign In Again button from email verification modal
+    const signInAgainBtn = document.getElementById('signInAgainBtn');
+    if (signInAgainBtn) {
+        signInAgainBtn.addEventListener('click', () => {
+            hideModal('emailVerificationModal');
+            showModal('authModal');
+        });
+    }
+    
     // Recipe form
     const recipeForm = document.getElementById('recipeForm');
     recipeForm.addEventListener('submit', handleRecipeSubmit);
@@ -1075,6 +1718,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     
     recipeImage.addEventListener('change', handleImageUpload);
+    
+    // Markdown preview for instructions
+    const instructionsTextarea = document.getElementById('recipeInstructions');
+    const instructionsPreview = document.getElementById('instructionsPreview');
+    
+    if (instructionsTextarea && instructionsPreview) {
+        // Update preview on input
+        instructionsTextarea.addEventListener('input', updateInstructionsPreview);
+        
+        // Initial preview update
+        updateInstructionsPreview();
+    }
     
     // Global search
     const globalSearch = document.getElementById('globalSearch');
@@ -1110,7 +1765,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             try {
                 const fullName = document.getElementById('profileFullName').value;
-                const response = await api.updateProfile({ fullName });
+                const showAuthorName = document.getElementById('showAuthorName').checked;
+                
+                const response = await api.updateProfile({ 
+                    fullName, 
+                    showAuthorName 
+                });
                 
                 app.setUser(response.user);
                 showToast('Profile updated successfully!', 'success');
@@ -1120,8 +1780,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
     
-    // Avatar upload
+    // Avatar upload and remove
     const changeAvatarBtn = document.getElementById('changeAvatarBtn');
+    const removeAvatarBtn = document.getElementById('removeAvatarBtn');
     const avatarInput = document.getElementById('avatarInput');
     
     if (changeAvatarBtn && avatarInput) {
@@ -1135,9 +1796,99 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             try {
                 const response = await api.uploadAvatar(file);
-                document.getElementById('profileAvatar').src = response.avatarUrl;
-                document.getElementById('userAvatar').src = response.avatarUrl;
+                
+                // Update all avatar displays
+                const profileAvatar = document.getElementById('profileAvatar');
+                const userAvatar = document.getElementById('userAvatar');
+                const removeAvatarBtn = document.getElementById('removeAvatarBtn');
+                
+                if (profileAvatar) {
+                    profileAvatar.src = response.avatarUrl;
+                    profileAvatar.style.display = 'block';
+                }
+                if (userAvatar) {
+                    userAvatar.src = response.avatarUrl;
+                    userAvatar.style.display = 'block';
+                    // Remove navigation fallback icon
+                    userAvatar.nextElementSibling?.remove();
+                }
+                if (removeAvatarBtn) {
+                    removeAvatarBtn.style.display = 'inline-block';
+                }
+                
+                // Remove any Material Icons fallback from profile
+                const avatarContainer = profileAvatar?.parentElement;
+                if (avatarContainer) {
+                    const existingIcon = avatarContainer.querySelector('.material-icons');
+                    if (existingIcon) {
+                        existingIcon.remove();
+                    }
+                }
+                
+                // Update user state
+                if (app.user) {
+                    app.user.avatarUrl = response.avatarUrl;
+                }
+                
                 showToast('Avatar updated successfully!', 'success');
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+    }
+    
+    if (removeAvatarBtn) {
+        removeAvatarBtn.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to remove your profile photo?')) {
+                return;
+            }
+            
+            try {
+                // Update profile to remove avatar
+                const response = await api.updateProfile({ avatarUrl: null });
+                
+                // Update all avatar displays
+                const profileAvatar = document.getElementById('profileAvatar');
+                const userAvatar = document.getElementById('userAvatar');
+                
+                if (profileAvatar) {
+                    profileAvatar.style.display = 'none';
+                }
+                if (userAvatar) {
+                    userAvatar.style.display = 'none';
+                }
+                
+                // Hide remove button
+                removeAvatarBtn.style.display = 'none';
+                
+                // Add Material Icons fallback to profile
+                const avatarContainer = profileAvatar?.parentElement;
+                if (avatarContainer) {
+                    let iconFallback = avatarContainer.querySelector('.material-icons');
+                    if (!iconFallback) {
+                        iconFallback = document.createElement('span');
+                        iconFallback.className = 'material-icons profile-avatar-fallback';
+                        iconFallback.textContent = 'account_circle';
+                        iconFallback.style.cssText = 'font-size: 120px; color: var(--text-secondary); width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--background-secondary);';
+                        avatarContainer.insertBefore(iconFallback, profileAvatar.nextSibling);
+                    }
+                }
+                
+                // Add Material Icons fallback to navigation
+                if (userAvatar && (!userAvatar.nextElementSibling || !userAvatar.nextElementSibling.classList.contains('material-icons'))) {
+                    const iconFallback = document.createElement('span');
+                    iconFallback.className = 'material-icons user-avatar-fallback';
+                    iconFallback.textContent = 'account_circle';
+                    iconFallback.style.cssText = 'font-size: 32px; color: var(--text-secondary); border-radius: 50%;';
+                    userAvatar.parentNode.insertBefore(iconFallback, userAvatar.nextSibling);
+                }
+                
+                // Update user state
+                if (app.user) {
+                    app.user.avatarUrl = null;
+                }
+                
+                showToast('Profile photo removed successfully!', 'success');
             } catch (error) {
                 showToast(error.message, 'error');
             }
@@ -1195,6 +1946,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Initialize with home page
     navigateToPage('home');
+    
+    // Initialize UI state
+    app.updateUI();
 });
 
 // Utility functions
@@ -1210,6 +1964,21 @@ function debounce(func, wait) {
     };
 }
 
+// Global updateInstructionsPreview function
+function updateInstructionsPreview() {
+    const instructionsTextarea = document.getElementById('recipeInstructions');
+    const instructionsPreview = document.getElementById('instructionsPreview');
+    
+    if (!instructionsTextarea || !instructionsPreview) return;
+    
+    const markdownText = instructionsTextarea.value.trim();
+    if (markdownText) {
+        instructionsPreview.innerHTML = marked.parse(markdownText);
+    } else {
+        instructionsPreview.innerHTML = '<div class="preview-placeholder" style="color: var(--text-secondary); font-style: italic; text-align: center; padding: 2rem;">Start typing above to see preview...</div>';
+    }
+}
+
 // Global functions for onclick handlers
 window.viewRecipe = viewRecipe;
 window.editRecipe = editRecipe;
@@ -1219,3 +1988,4 @@ window.removeIngredientRow = removeIngredientRow;
 window.removeImage = removeImage;
 window.showModal = showModal;
 window.hideModal = hideModal;
+window.updateInstructionsPreview = updateInstructionsPreview;

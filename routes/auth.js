@@ -65,18 +65,51 @@ router.post('/register', async (req, res) => {
 
     // Create user profile in public.users table
     if (data.user) {
-      const { error: profileError } = await supabase
-        .from('users')
-        .insert({
-          id: data.user.id,
-          email: data.user.email,
-          full_name: fullName || '',
-          avatar_url: null
-        });
+      // If session exists, use it for RLS compliance
+      if (data.session) {
+        const userSupabase = createClient(
+          process.env.SUPABASE_URL,
+          process.env.SUPABASE_ANON_KEY,
+          {
+            global: {
+              headers: {
+                Authorization: `Bearer ${data.session.access_token}`
+              }
+            }
+          }
+        );
 
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-        // Don't fail registration if profile creation fails
+        const { error: profileError } = await userSupabase
+          .from('users')
+          .insert({
+            id: data.user.id,
+            email: data.user.email,
+            full_name: fullName || '',
+            avatar_url: null
+          });
+
+        if (profileError) {
+          console.error('Profile creation error:', profileError);
+        }
+      } else {
+        // If no session (email confirmation required), use service role
+        const serviceSupabase = createClient(
+          process.env.SUPABASE_URL,
+          process.env.SUPABASE_SERVICE_ROLE_KEY
+        );
+
+        const { error: profileError } = await serviceSupabase
+          .from('users')
+          .insert({
+            id: data.user.id,
+            email: data.user.email,
+            full_name: fullName || '',
+            avatar_url: null
+          });
+
+        if (profileError) {
+          console.error('Profile creation error (service role):', profileError);
+        }
       }
     }
 
@@ -194,6 +227,7 @@ router.get('/profile', requireAuth, async (req, res) => {
         email: profile.email,
         fullName: profile.full_name,
         avatarUrl: profile.avatar_url,
+        showAuthorName: profile.show_author_name,
         createdAt: profile.created_at,
         updatedAt: profile.updated_at
       }
@@ -208,7 +242,20 @@ router.get('/profile', requireAuth, async (req, res) => {
 // Update user profile
 router.put('/profile', requireAuth, async (req, res) => {
   try {
-    const { fullName, avatarUrl } = req.body;
+    const { fullName, avatarUrl, showAuthorName } = req.body;
+
+    // Create a client with the user's token for RLS compliance
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
 
     const updates = {
       updated_at: new Date().toISOString()
@@ -222,26 +269,36 @@ router.put('/profile', requireAuth, async (req, res) => {
       updates.avatar_url = avatarUrl;
     }
 
-    const { data, error } = await supabase
+    if (showAuthorName !== undefined) {
+      updates.show_author_name = showAuthorName;
+    }
+
+    const { data, error } = await userSupabase
       .from('users')
       .update(updates)
       .eq('id', req.user.id)
-      .select()
-      .single();
+      .select();
 
     if (error) {
       console.error('Profile update error:', error);
       return res.status(400).json({ error: error.message });
     }
 
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = data[0];
+
     res.json({
       message: 'Profile updated successfully',
       user: {
-        id: data.id,
-        email: data.email,
-        fullName: data.full_name,
-        avatarUrl: data.avatar_url,
-        updatedAt: data.updated_at
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name,
+        avatarUrl: user.avatar_url,
+        showAuthorName: user.show_author_name,
+        updatedAt: user.updated_at
       }
     });
 

@@ -135,6 +135,30 @@ router.post('/avatar', requireAuth, upload.single('avatar'), async (req, res) =>
     // Return the URL path
     const avatarUrl = `/uploads/avatars/${filename}`;
     
+    // Update user's avatar in database
+    const { createClient } = require('@supabase/supabase-js');
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
+
+    const { error: updateError } = await userSupabase
+      .from('users')
+      .update({ avatar_url: avatarUrl })
+      .eq('id', req.user.id);
+
+    if (updateError) {
+      console.error('Error updating avatar in database:', updateError);
+      // Still return success since file was uploaded
+    }
+    
     res.json({
       message: 'Avatar uploaded successfully',
       avatarUrl: avatarUrl,
