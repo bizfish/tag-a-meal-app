@@ -32,21 +32,7 @@ class AppState {
         
         if (this.user) {
             userName.textContent = this.user.fullName || this.user.email;
-            if (this.user.avatarUrl) {
-                userAvatar.src = this.user.avatarUrl;
-                userAvatar.style.display = 'block';
-                userAvatar.nextElementSibling?.remove(); // Remove any icon fallback
-            } else {
-                userAvatar.style.display = 'none';
-                // Add Material Icons fallback if not already present
-                if (!userAvatar.nextElementSibling || !userAvatar.nextElementSibling.classList.contains('material-icons')) {
-                    const iconFallback = document.createElement('span');
-                    iconFallback.className = 'material-icons user-avatar-fallback';
-                    iconFallback.textContent = 'account_circle';
-                    iconFallback.style.cssText = 'font-size: 32px; color: var(--text-secondary); border-radius: 50%;';
-                    userAvatar.parentNode.insertBefore(iconFallback, userAvatar.nextSibling);
-                }
-            }
+            updateAvatarDisplay(userAvatar, this.user.avatarUrl, 'user');
             this.showAuthenticatedUI();
         } else {
             userName.textContent = 'Guest';
@@ -1131,79 +1117,6 @@ async function viewRecipe(recipeId) {
     }
 }
 
-function renderRecipeDetail(recipe) {
-    const container = document.getElementById('recipeDetail');
-    
-    container.innerHTML = `
-        <div class="recipe-header">
-            <h1>${recipe.title}</h1>
-            <img src="${recipe.image_url || '/api/placeholder-recipe'}" alt="${recipe.title}" class="recipe-detail-image">
-            <p class="recipe-description">${recipe.description || ''}</p>
-            
-            <div class="recipe-detail-meta">
-                <div class="meta-item">
-                    <i class="fas fa-clock"></i>
-                    <span>Prep: ${recipe.prep_time || 0} min</span>
-                </div>
-                <div class="meta-item">
-                    <i class="fas fa-fire"></i>
-                    <span>Cook: ${recipe.cook_time || 0} min</span>
-                </div>
-                <div class="meta-item">
-                    <i class="fas fa-users"></i>
-                    <span>${recipe.servings || 1} servings</span>
-                </div>
-                <div class="meta-item">
-                    <i class="fas fa-signal"></i>
-                    <span>${recipe.difficulty || 'easy'}</span>
-                </div>
-                <div class="meta-item">
-                    <i class="fas fa-star"></i>
-                    <span>${recipe.averageRating?.toFixed(1) || '0.0'} (${recipe.totalRatings || 0} reviews)</span>
-                </div>
-            </div>
-            
-            <div class="recipe-tags">
-                ${(recipe.recipe_tags || []).map(rt => 
-                    `<span class="tag" style="background-color: ${rt.tags.color}">${rt.tags.name}</span>`
-                ).join('')}
-            </div>
-            
-            ${app.user && app.user.id === recipe.user_id ? `
-                <div class="recipe-actions" style="margin-top: 1rem;">
-                    <button class="btn btn-primary" onclick="editRecipe('${recipe.id}')">
-                        <i class="fas fa-edit"></i> Edit Recipe
-                    </button>
-                    <button class="btn btn-secondary" onclick="copyRecipe('${recipe.id}')">
-                        <i class="fas fa-copy"></i> Copy Recipe
-                    </button>
-                    <button class="btn btn-error" onclick="deleteRecipe('${recipe.id}')">
-                        <i class="fas fa-trash"></i> Delete Recipe
-                    </button>
-                </div>
-            ` : ''}
-        </div>
-        
-        <div class="recipe-detail-content">
-            <div class="ingredients-section">
-                <h3>Ingredients</h3>
-                <ul class="ingredient-list">
-                    ${(recipe.recipe_ingredients || []).map(ri => `
-                        <li>
-                            <span>${ri.ingredients.name}</span>
-                            <span>${ri.quantity || ''} ${ri.unit || ''}</span>
-                        </li>
-                    `).join('')}
-                </ul>
-            </div>
-            
-            <div class="instructions-section">
-                <h3>Instructions</h3>
-                <div class="instructions-text">${marked.parse(recipe.instructions)}</div>
-            </div>
-        </div>
-    `;
-}
 
 function renderRecipeDetailModal(recipe) {
     const container = document.getElementById('recipeDetailContent');
@@ -1305,26 +1218,7 @@ function renderRecipeDetailModal(recipe) {
     `;
 
     // Add event listeners for modal action buttons
-    container.querySelectorAll('.modal-edit-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            hideModal('recipeDetailModal');
-            editRecipe(btn.dataset.recipeId);
-        });
-    });
-
-    container.querySelectorAll('.modal-copy-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            hideModal('recipeDetailModal');
-            copyRecipe(btn.dataset.recipeId);
-        });
-    });
-
-    container.querySelectorAll('.modal-copy-edit-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            hideModal('recipeDetailModal');
-            copyAndEditRecipe(btn.dataset.recipeId);
-        });
-    });
+    attachModalActionListeners(container);
 }
 
 function populateRecipeForm(recipe, options = {}) {
@@ -1570,9 +1464,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     
     // Set up auth modal
-    const authModal = document.getElementById('authModal');
     const authForm = document.getElementById('authForm');
-    const authSwitchLink = document.getElementById('authSwitchLink');
     const registerFields = document.getElementById('registerFields');
     const authModalTitle = document.getElementById('authModalTitle');
     const authSubmitText = document.getElementById('authSubmitText');
@@ -1962,6 +1854,54 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+// Shared function for updating avatar displays
+function updateAvatarDisplay(avatarElement, avatarUrl, type = 'user') {
+    if (!avatarElement) return;
+    
+    if (avatarUrl) {
+        avatarElement.src = avatarUrl;
+        avatarElement.style.display = 'block';
+        avatarElement.nextElementSibling?.remove(); // Remove any icon fallback
+    } else {
+        avatarElement.style.display = 'none';
+        // Add Material Icons fallback if not already present
+        if (!avatarElement.nextElementSibling || !avatarElement.nextElementSibling.classList.contains('material-icons')) {
+            const iconFallback = document.createElement('span');
+            iconFallback.className = `material-icons ${type}-avatar-fallback`;
+            iconFallback.textContent = 'account_circle';
+            
+            const size = type === 'profile' ? '120px' : '32px';
+            iconFallback.style.cssText = `font-size: ${size}; color: var(--text-secondary); border-radius: 50%; ${type === 'profile' ? 'width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; background: var(--background-secondary);' : ''}`;
+            
+            avatarElement.parentNode.insertBefore(iconFallback, avatarElement.nextSibling);
+        }
+    }
+}
+
+// Shared function for attaching modal action listeners
+function attachModalActionListeners(container) {
+    container.querySelectorAll('.modal-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            hideModal('recipeDetailModal');
+            editRecipe(btn.dataset.recipeId);
+        });
+    });
+
+    container.querySelectorAll('.modal-copy-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            hideModal('recipeDetailModal');
+            copyRecipe(btn.dataset.recipeId);
+        });
+    });
+
+    container.querySelectorAll('.modal-copy-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            hideModal('recipeDetailModal');
+            copyAndEditRecipe(btn.dataset.recipeId);
+        });
+    });
 }
 
 // Global updateInstructionsPreview function

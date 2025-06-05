@@ -951,60 +951,6 @@ h6 { font-size: 1rem; }
     color: var(--text-secondary);
 }
 
-/* Instructions editor tabs */
-.instructions-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border-color);
-    margin-bottom: 1rem;
-}
-
-.instructions-tab {
-    padding: 0.75rem 1.5rem;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: var(--transition);
-}
-
-.instructions-tab.active {
-    color: var(--primary-color);
-    border-bottom-color: var(--primary-color);
-}
-
-.instructions-tab:hover {
-    color: var(--text-primary);
-}
-
-.instructions-content {
-    position: relative;
-}
-
-.instructions-panel {
-    display: none;
-}
-
-.instructions-panel.active {
-    display: block;
-}
-
-.instructions-preview-panel {
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 1rem;
-    min-height: 400px;
-    background: var(--background-secondary);
-    overflow-y: auto;
-}
-
-.instructions-preview-panel .preview-placeholder {
-    color: var(--text-secondary);
-    font-style: italic;
-    text-align: center;
-    padding: 2rem;
-}
 
 /* Instructions preview box styling */
 .instructions-preview-box {
