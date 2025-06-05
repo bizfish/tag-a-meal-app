@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag-a-Meal - Recipe Management</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <i class="fas fa-utensils"></i>
+                <span>Tag-a-Meal</span>
+            </div>
+            
+            <div class="nav-search">
+                <div class="search-container">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="globalSearch" placeholder="Search recipes, ingredients, tags...">
+                    <div id="searchResults" class="search-results"></div>
+                </div>
+            </div>
+            
+            <div class="nav-menu">
+                <button class="nav-item" data-page="home">
+                    <i class="fas fa-home"></i>
+                    <span>Home</span>
+                </button>
+                <button class="nav-item" data-page="recipes">
+                    <i class="fas fa-book"></i>
+                    <span>Recipes</span>
+                </button>
+                <button class="nav-item" data-page="my-recipes">
+                    <i class="fas fa-user-circle"></i>
+                    <span>My Recipes</span>
+                </button>
+                <button class="nav-item" data-page="create-recipe">
+                    <i class="fas fa-plus"></i>
+                    <span>Create</span>
+                </button>
+                <div class="nav-user">
+                    <button id="userMenuBtn" class="user-menu-btn">
+                        <img id="userAvatar" src="/api/placeholder-avatar" alt="User" class="user-avatar">
+                        <span id="userName">Guest</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                    <div id="userDropdown" class="user-dropdown">
+                        <a href="#" id="profileLink"><i class="fas fa-user"></i> Profile</a>
+                        <a href="#" id="settingsLink"><i class="fas fa-cog"></i> Settings</a>
+                        <hr>
+                        <a href="#" id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Home Page -->
+        <div id="homePage" class="page active">
+            <div class="hero-section">
+                <div class="hero-content">
+                    <h1>Welcome to Tag-a-Meal</h1>
+                    <p>Organize, discover, and share your favorite recipes with our comprehensive recipe management platform.</p>
+                    <div class="hero-actions">
+                        <button class="btn btn-primary" data-page="recipes">Explore Recipes</button>
+                        <button class="btn btn-secondary" data-page="create-recipe">Create Recipe</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="container">
+                <section class="featured-section">
+                    <h2>Featured Recipes</h2>
+                    <div id="featuredRecipes" class="recipe-grid">
+                        <!-- Featured recipes will be loaded here -->
+                    </div>
+                </section>
+                
+                <section class="stats-section">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <i class="fas fa-book"></i>
+                            <h3 id="totalRecipes">0</h3>
+                            <p>Total Recipes</p>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-users"></i>
+                            <h3 id="totalUsers">0</h3>
+                            <p>Active Users</p>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-tags"></i>
+                            <h3 id="totalTags">0</h3>
+                            <p>Recipe Tags</p>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-leaf"></i>
+                            <h3 id="totalIngredients">0</h3>
+                            <p>Ingredients</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Recipes Page -->
+        <div id="recipesPage" class="page">
+            <div class="container">
+                <div class="page-header">
+                    <h1>All Recipes</h1>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" data-page="create-recipe">
+                            <i class="fas fa-plus"></i> New Recipe
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="filters-section">
+                    <div class="filters-container">
+                        <div class="filter-group">
+                            <label>Search</label>
+                            <input type="text" id="recipeSearch" placeholder="Search recipes...">
+                        </div>
+                        <div class="filter-group">
+                            <label>Difficulty</label>
+                            <select id="difficultyFilter">
+                                <option value="">All</option>
+                                <option value="easy">Easy</option>
+                                <option value="medium">Medium</option>
+                                <option value="hard">Hard</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Tags</label>
+                            <div id="tagFilters" class="tag-filters">
+                                <!-- Tag filters will be loaded here -->
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <label>Sort By</label>
+                            <select id="sortBy">
+                                <option value="created_at">Newest</option>
+                                <option value="title">Title</option>
+                                <option value="prep_time">Prep Time</option>
+                                <option value="cook_time">Cook Time</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="recipesGrid" class="recipe-grid">
+                    <!-- Recipes will be loaded here -->
+                </div>
+                
+                <div id="recipesPagination" class="pagination">
+                    <!-- Pagination will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- My Recipes Page -->
+        <div id="myRecipesPage" class="page">
+            <div class="container">
+                <div class="page-header">
+                    <h1>My Recipes</h1>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" data-page="create-recipe">
+                            <i class="fas fa-plus"></i> New Recipe
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="myRecipesGrid" class="recipe-grid">
+                    <!-- User's recipes will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Create/Edit Recipe Page -->
+        <div id="createRecipePage" class="page">
+            <div class="container">
+                <div class="page-header">
+                    <h1 id="recipeFormTitle">Create New Recipe</h1>
+                </div>
+                
+                <form id="recipeForm" class="recipe-form">
+                    <div class="form-section">
+                        <h3>Basic Information</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="recipeTitle">Title *</label>
+                                <input type="text" id="recipeTitle" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="recipeDifficulty">Difficulty</label>
+                                <select id="recipeDifficulty">
+                                    <option value="easy">Easy</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="hard">Hard</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="recipePrepTime">Prep Time (minutes)</label>
+                                <input type="number" id="recipePrepTime" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipeCookTime">Cook Time (minutes)</label>
+                                <input type="number" id="recipeCookTime" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipeServings">Servings</label>
+                                <input type="number" id="recipeServings" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="recipePublic">Visibility</label>
+                                <select id="recipePublic">
+                                    <option value="false">Private</option>
+                                    <option value="true">Public</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="recipeDescription">Description</label>
+                            <textarea id="recipeDescription" rows="3" placeholder="Brief description of your recipe..."></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="form-section">
+                        <h3>Recipe Image</h3>
+                        <div class="image-upload">
+                            <input type="file" id="recipeImage" accept="image/*" style="display: none;">
+                            <div id="imagePreview" class="image-preview">
+                                <button type="button" id="uploadImageBtn" class="upload-btn">
+                                    <i class="fas fa-camera"></i>
+                                    <span>Upload Image</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-section">
+                        <h3>Ingredients</h3>
+                        <div id="ingredientsList" class="ingredients-list">
+                            <!-- Ingredients will be added here -->
+                        </div>
+                        <button type="button" id="addIngredientBtn" class="btn btn-secondary">
+                            <i class="fas fa-plus"></i> Add Ingredient
+                        </button>
+                    </div>
+                    
+                    <div class="form-section">
+                        <h3>Instructions *</h3>
+                        <textarea id="recipeInstructions" rows="8" required placeholder="Step-by-step cooking instructions..."></textarea>
+                    </div>
+                    
+                    <div class="form-section">
+                        <h3>Tags</h3>
+                        <div id="recipeTags" class="recipe-tags">
+                            <!-- Tags will be loaded here -->
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" data-page="recipes">Cancel</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Save Recipe
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Recipe Detail Page -->
+        <div id="recipeDetailPage" class="page">
+            <div class="container">
+                <div id="recipeDetail" class="recipe-detail">
+                    <!-- Recipe details will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Profile Page -->
+        <div id="profilePage" class="page">
+            <div class="container">
+                <div class="page-header">
+                    <h1>My Profile</h1>
+                </div>
+                
+                <form id="profileForm" class="profile-form">
+                    <div class="form-section">
+                        <h3>Profile Information</h3>
+                        <div class="profile-avatar">
+                            <img id="profileAvatar" src="/api/placeholder-avatar" alt="Profile">
+                            <button type="button" id="changeAvatarBtn" class="btn btn-secondary">
+                                <i class="fas fa-camera"></i> Change Avatar
+                            </button>
+                            <input type="file" id="avatarInput" accept="image/*" style="display: none;">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="profileFullName">Full Name</label>
+                            <input type="text" id="profileFullName">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="profileEmail">Email</label>
+                            <input type="email" id="profileEmail" readonly>
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Save Changes
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <!-- Authentication Modal -->
+    <div id="authModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="authModalTitle">Sign In</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <form id="authForm">
+                    <div class="form-group">
+                        <label for="authEmail">Email</label>
+                        <input type="email" id="authEmail" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="authPassword">Password</label>
+                        <input type="password" id="authPassword" required>
+                    </div>
+                    
+                    <div id="registerFields" class="register-fields" style="display: none;">
+                        <div class="form-group">
+                            <label for="authFullName">Full Name</label>
+                            <input type="text" id="authFullName">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="authConfirmPassword">Confirm Password</label>
+                            <input type="password" id="authConfirmPassword">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-full">
+                        <span id="authSubmitText">Sign In</span>
+                    </button>
+                </form>
+                
+                <div class="auth-switch">
+                    <p id="authSwitchText">Don't have an account? <a href="#" id="authSwitchLink">Sign up</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Unit Converter Modal -->
+    <div id="unitConverterModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Unit Converter</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="converter-form">
+                    <div class="form-group">
+                        <label for="convertQuantity">Quantity</label>
+                        <input type="number" id="convertQuantity" step="0.001">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="convertFromUnit">From Unit</label>
+                        <select id="convertFromUnit">
+                            <!-- Units will be loaded here -->
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="convertToUnit">To Unit</label>
+                        <select id="convertToUnit">
+                            <!-- Units will be loaded here -->
+                        </select>
+                    </div>
+                    
+                    <button type="button" id="convertBtn" class="btn btn-primary">Convert</button>
+                    
+                    <div id="conversionResult" class="conversion-result">
+                        <!-- Result will be shown here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="app.js"></script>
+</body>
+</html>
