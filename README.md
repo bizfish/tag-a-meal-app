@@ -12,9 +12,7 @@ A comprehensive recipe management web application built with Node.js, Express, a
 - **Tagging System**: Organize recipes with colorful, descriptive tags
 - **Ingredient Database**: Comprehensive ingredient management with categories
 - **Rating System**: Rate and review recipes
-- **Collections**: Organize recipes into custom collections
 - **Responsive Design**: Mobile-friendly interface
-- **Real-time Features**: Live search and instant updates
 
 ## Tech Stack
 
@@ -95,6 +93,25 @@ A comprehensive recipe management web application built with Node.js, Express, a
 6. **Access the application**
    Open your browser and navigate to `http://localhost:3000`
 
+## Database Management
+
+### Available Scripts
+
+- `npm run setup-db` - Initial database setup (creates tables, indexes, RLS policies)
+- `npm run reset-db` - Reset database to default state (removes all user data)
+
+### Database Reset
+
+To reset your database to its original state (useful for testing or starting fresh):
+
+```bash
+npm run reset-db
+```
+
+⚠️ **Warning**: This will permanently delete ALL user data including recipes, users, ratings, and collections. Only default tags and ingredients will remain.
+
+For detailed information about database reset functionality, see [DATABASE_RESET.md](DATABASE_RESET.md).
+
 ## Database Schema
 
 The application uses the following main tables:
@@ -165,7 +182,6 @@ The application uses the following main tables:
 ### Advanced Features
 
 - **Unit Conversion**: Use the built-in converter for cooking measurements
-- **Collections**: Organize recipes into themed collections
 - **Advanced Search**: Filter recipes by difficulty, cooking time, ingredients, and more
 - **Image Management**: Upload, resize, and manage recipe photos
 
@@ -175,29 +191,45 @@ The application uses the following main tables:
 
 ```
 tag-a-meal/
-├── public/                 # Frontend files
-│   ├── index.html         # Main HTML file
-│   ├── styles.css         # CSS styles
-│   └── app.js            # JavaScript application
-├── routes/                # API routes
-│   ├── auth.js           # Authentication routes
-│   ├── recipes.js        # Recipe routes
-│   ├── ingredients.js    # Ingredient routes
-│   ├── tags.js          # Tag routes
-│   ├── upload.js        # File upload routes
-│   └── search.js        # Search routes
-├── scripts/              # Utility scripts
-│   └── setup-database.js # Database setup script
-├── uploads/              # File upload directory
-├── server.js            # Main server file
-├── package.json         # Dependencies and scripts
-└── README.md           # This file
+├── public/                    # Frontend files
+│   ├── index.html            # Main HTML file
+│   ├── styles.css            # CSS styles
+│   ├── app-refactored.js     # Main application logic
+│   └── js/                   # JavaScript modules
+│       ├── api-service.js    # API communication
+│       ├── navigation.js     # Navigation handling
+│       ├── recipe-management.js # Recipe CRUD operations
+│       ├── ui-utils.js       # UI utilities
+│       ├── typeahead-system.js # Search typeahead
+│       └── ingredient-filter.js # Ingredient filtering
+├── routes/                   # API routes
+│   ├── auth.js              # Authentication routes
+│   ├── recipes.js           # Recipe routes
+│   ├── ingredients.js       # Ingredient routes
+│   ├── tags.js             # Tag routes
+│   ├── upload.js           # File upload routes
+│   └── search.js           # Search routes
+├── scripts/                 # Utility scripts
+│   ├── setup-database.js   # Database setup script
+│   ├── reset-database.js   # Database reset script
+│   └── reset-database.sql  # SQL reset queries
+├── utils/                   # Utility modules
+│   ├── database.js         # Database utilities
+│   ├── supabase.js         # Supabase client
+│   ├── validation.js       # Input validation
+│   └── responses.js        # Response helpers
+├── uploads/                 # File upload directory
+├── server.js               # Main server file
+├── package.json            # Dependencies and scripts
+├── Caddyfile              # Caddy web server config
+├── DATABASE_RESET.md      # Database reset guide
+└── README.md              # This file
 ```
 
 ### Adding New Features
 
 1. **Backend**: Add new routes in the `routes/` directory
-2. **Frontend**: Update the JavaScript in `public/app.js`
+2. **Frontend**: Update the JavaScript modules in `public/js/`
 3. **Database**: Modify the schema in `scripts/setup-database.js`
 4. **Styling**: Add CSS to `public/styles.css`
 
@@ -222,113 +254,14 @@ tag-a-meal/
 
 ### Using Caddy Web Server (Recommended)
 
-This project includes a `Caddyfile` for easy deployment with Caddy web server, which provides automatic HTTPS, security headers, and performance optimizations.
+This project includes a `Caddyfile` for deployment with Caddy web server:
 
-#### Prerequisites
+1. **Install Caddy** and point your domain's DNS to your server
+2. **Update the Caddyfile** with your domain name and email
+3. **Start the application**: `npm start`
+4. **Start Caddy**: `sudo caddy run --config Caddyfile`
 
-1. **Install Caddy**: Follow the installation guide at [caddyserver.com](https://caddyserver.com/docs/install)
-2. **Domain Setup**: Point your domain's DNS to your server's IP address
-
-#### Configuration Steps
-
-1. **Update the Caddyfile**:
-   ```bash
-   # Edit the Caddyfile in the project root
-   nano Caddyfile
-   ```
-   
-   Replace the following placeholders:
-   - `your-domain.com` with your actual domain name
-   - `your-email@example.com` with your email for Let's Encrypt certificates
-
-2. **For Production Deployment**:
-   ```bash
-   # Start your Node.js application
-   npm start
-   
-   # In another terminal, start Caddy
-   sudo caddy run --config Caddyfile
-   ```
-
-3. **For Local Development**:
-   ```bash
-   # Edit Caddyfile to uncomment the localhost section and comment out the domain section
-   # Then start your Node.js application
-   npm run dev
-   
-   # Start Caddy for local testing
-   caddy run --config Caddyfile
-   ```
-   
-   Your app will be available at `http://localhost:8080`
-
-#### Caddy Features Included
-
-- **Automatic HTTPS**: Let's Encrypt certificates are automatically obtained and renewed
-- **Security Headers**: Comprehensive security headers including CSP, HSTS, and XSS protection
-- **Rate Limiting**: API endpoints are rate-limited to prevent abuse
-- **Gzip Compression**: Automatic compression for better performance
-- **Static Asset Caching**: Long-term caching for CSS, JS, and image files
-- **Error Handling**: Graceful error pages and SPA routing support
-- **Logging**: Access logs in JSON format for monitoring
-
-#### Systemd Service (Linux)
-
-For production deployment, create a systemd service:
-
-1. **Create service file**:
-   ```bash
-   sudo nano /etc/systemd/system/tag-a-meal.service
-   ```
-   
-   ```ini
-   [Unit]
-   Description=Tag-a-Meal Recipe App
-   After=network.target
-   
-   [Service]
-   Type=simple
-   User=www-data
-   WorkingDirectory=/path/to/tag-a-meal
-   ExecStart=/usr/bin/node server.js
-   Restart=always
-   RestartSec=10
-   Environment=NODE_ENV=production
-   EnvironmentFile=/path/to/tag-a-meal/.env
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-2. **Create Caddy service file**:
-   ```bash
-   sudo nano /etc/systemd/system/caddy-tag-a-meal.service
-   ```
-   
-   ```ini
-   [Unit]
-   Description=Caddy web server for Tag-a-Meal
-   After=network.target tag-a-meal.service
-   Requires=tag-a-meal.service
-   
-   [Service]
-   Type=simple
-   User=caddy
-   Group=caddy
-   WorkingDirectory=/path/to/tag-a-meal
-   ExecStart=/usr/bin/caddy run --config Caddyfile
-   Restart=always
-   RestartSec=10
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-3. **Enable and start services**:
-   ```bash
-   sudo systemctl enable tag-a-meal caddy-tag-a-meal
-   sudo systemctl start tag-a-meal caddy-tag-a-meal
-   ```
+Caddy provides automatic HTTPS, security headers, rate limiting, and performance optimizations.
 
 ### Alternative Hosting Options
 
@@ -401,17 +334,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Support
 
-For support, please open an issue on the GitHub repository or contact the development team.
-
-## Changelog
-
-### v1.0.0
-- Initial release
-- User authentication and profiles
-- Recipe CRUD operations
-- Image upload and management
-- Search and filtering
-- Unit conversion
-- Tagging system
-- Rating and review system
-- Responsive design
+For support, please open an issue on the GitHub repository.
