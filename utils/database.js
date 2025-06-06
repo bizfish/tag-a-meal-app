@@ -42,36 +42,57 @@ async function getRecipesWithFilters(options = {}) {
 
   const offset = (page - 1) * limit;
 
+  // Build base query for counting total records
+  let countQuery = client
+    .from('recipes')
+    .select('*', { count: 'exact', head: true });
+
+  // Build main query for fetching records
   let query = client
     .from('recipes')
     .select(RECIPE_SELECT_QUERY)
     .order(sortBy, { ascending: sortOrder === 'asc' })
     .range(offset, offset + limit - 1);
 
-  // Apply visibility filters
+  // Apply visibility filters to both queries
   if (userId) {
     query = query.eq('user_id', userId);
+    countQuery = countQuery.eq('user_id', userId);
   } else if (publicOnly) {
     query = query.eq('is_public', true);
+    countQuery = countQuery.eq('is_public', true);
   } else if (currentUserId) {
     query = query.or(`is_public.eq.true,user_id.eq.${currentUserId}`);
+    countQuery = countQuery.or(`is_public.eq.true,user_id.eq.${currentUserId}`);
   } else {
     query = query.eq('is_public', true);
+    countQuery = countQuery.eq('is_public', true);
   }
 
-  // Apply search filters
+  // Apply search filters to both queries
   if (search) {
-    query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,instructions.ilike.%${search}%`);
+    const searchFilter = `title.ilike.%${search}%,description.ilike.%${search}%,instructions.ilike.%${search}%`;
+    query = query.or(searchFilter);
+    countQuery = countQuery.or(searchFilter);
   }
 
   if (difficulty) {
     query = query.eq('difficulty', difficulty);
+    countQuery = countQuery.eq('difficulty', difficulty);
   }
 
-  const { data: recipes, error } = await query;
+  // Execute both queries
+  const [{ data: recipes, error }, { count: totalCount, error: countError }] = await Promise.all([
+    query,
+    countQuery
+  ]);
 
   if (error) {
     throw error;
+  }
+
+  if (countError) {
+    throw countError;
   }
 
   // Apply client-side filters for complex queries
@@ -128,7 +149,7 @@ async function getRecipesWithFilters(options = {}) {
     pagination: {
       page: parseInt(page),
       limit: parseInt(limit),
-      total: recipesWithRatings.length
+      total: totalCount || 0
     }
   };
 }

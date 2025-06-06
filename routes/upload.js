@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { requireAuth } = require('./auth');
+const { createAuthenticatedClient } = require('../utils/supabase');
 const router = express.Router();
 
 // Configure multer for file uploads
@@ -136,18 +137,7 @@ router.post('/avatar', requireAuth, upload.single('avatar'), async (req, res) =>
     const avatarUrl = `/uploads/avatars/${filename}`;
     
     // Update user's avatar in database
-    const { createClient } = require('@supabase/supabase-js');
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     const { error: updateError } = await userSupabase
       .from('users')

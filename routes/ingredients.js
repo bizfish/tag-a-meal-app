@@ -1,70 +1,52 @@
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
-const { requireAuth } = require('./auth');
 const router = express.Router();
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+// Import shared utilities
+const { getBaseClient, createAuthenticatedClient } = require('../utils/supabase');
+const { sendSuccess, sendError, handleDatabaseError, asyncHandler } = require('../utils/responses');
+const { validateIngredientData, validatePagination } = require('../utils/validation');
+const { getResourceUsageCount } = require('../utils/database');
+const { requireAuth } = require('./auth');
+
+const supabase = getBaseClient();
 
 // Get all ingredients
-router.get('/', async (req, res) => {
-  try {
-    const { search, category, page = 1, limit = 50 } = req.query;
-    const offset = (page - 1) * limit;
+router.get('/', asyncHandler(async (req, res) => {
+  const { page, limit } = validatePagination(req.query);
+  const { search, category } = req.query;
+  const offset = (page - 1) * limit;
 
-    // Use authenticated client if token is provided
-    let client = supabase;
-    if (req.headers.authorization) {
-      client = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: req.headers.authorization
-            }
-          }
-        }
-      );
-    }
+  const client = req.headers.authorization ? createAuthenticatedClient(req) : supabase;
 
-    let query = client
-      .from('ingredients')
-      .select('*')
-      .order('name')
-      .range(offset, offset + limit - 1);
+  let query = client
+    .from('ingredients')
+    .select('*')
+    .order('name')
+    .range(offset, offset + limit - 1);
 
-    if (search) {
-      query = query.ilike('name', `%${search}%`);
-    }
-
-    if (category) {
-      query = query.eq('category', category);
-    }
-
-    const { data: ingredients, error } = await query;
-
-    if (error) {
-      console.error('Error fetching ingredients:', error);
-      return res.status(500).json({ error: 'Failed to fetch ingredients' });
-    }
-
-    res.json({
-      ingredients,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: ingredients.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Error in get ingredients:', error);
-    res.status(500).json({ error: 'Internal server error' });
+  if (search) {
+    query = query.ilike('name', `%${search}%`);
   }
-});
+
+  if (category) {
+    query = query.eq('category', category);
+  }
+
+  const { data: ingredients, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  sendSuccess(res, {
+    ingredients,
+    pagination: {
+      page,
+      limit,
+      total: ingredients.length
+    }
+  });
+}));
 
 // Get ingredient categories
 router.get('/categories', async (req, res) => {
@@ -116,62 +98,41 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new ingredient
-router.post('/', requireAuth, async (req, res) => {
-  try {
-    const { name, category } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'Ingredient name is required' });
-    }
-
-    // Create a client with the user's token for RLS compliance
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
-
-    // Check if ingredient already exists
-    const { data: existing } = await userSupabase
-      .from('ingredients')
-      .select('id')
-      .eq('name', name.trim())
-      .single();
-
-    if (existing) {
-      return res.status(409).json({ error: 'Ingredient already exists' });
-    }
-
-    const { data: ingredient, error } = await userSupabase
-      .from('ingredients')
-      .insert({
-        name: name.trim(),
-        category: category?.trim() || null
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating ingredient:', error);
-      return res.status(400).json({ error: error.message });
-    }
-
-    res.status(201).json({
-      message: 'Ingredient created successfully',
-      ingredient
-    });
-
-  } catch (error) {
-    console.error('Error creating ingredient:', error);
-    res.status(500).json({ error: 'Internal server error' });
+router.post('/', requireAuth, asyncHandler(async (req, res) => {
+  const validationError = validateIngredientData(req.body);
+  if (validationError) {
+    return sendError(res, validationError.message, validationError.statusCode);
   }
-});
+
+  const { name, category } = req.body;
+  const client = createAuthenticatedClient(req);
+
+  // Check if ingredient already exists
+  const { data: existing } = await client
+    .from('ingredients')
+    .select('id')
+    .eq('name', name.trim())
+    .single();
+
+  if (existing) {
+    return sendError(res, 'Ingredient already exists', 409);
+  }
+
+  const { data: ingredient, error } = await client
+    .from('ingredients')
+    .insert({
+      name: name.trim(),
+      category: category?.trim() || null
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  sendSuccess(res, { ingredient }, 'Ingredient created successfully', 201);
+}));
 
 // Update ingredient
 router.put('/:id', requireAuth, async (req, res) => {

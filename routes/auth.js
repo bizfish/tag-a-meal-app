@@ -158,18 +158,7 @@ router.post('/logout', async (req, res) => {
     
     if (token) {
       // Create a temporary client with the user's token
-      const userSupabase = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        }
-      );
-
+      const userSupabase = createAuthenticatedClient({ headers: { authorization: req.headers.authorization } });
       await userSupabase.auth.signOut();
     }
 
@@ -218,17 +207,7 @@ router.put('/profile', requireAuth, async (req, res) => {
     const { fullName, avatarUrl, showAuthorName } = req.body;
 
     // Create a client with the user's token for RLS compliance
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     const updates = {
       updated_at: new Date().toISOString()
@@ -315,8 +294,9 @@ router.post('/reset-password', async (req, res) => {
   try {
     const { email } = req.body;
 
-    if (!email || !validator.isEmail(email)) {
-      return res.status(400).json({ error: 'Valid email is required' });
+    const emailError = validateEmail(email);
+    if (emailError) {
+      return sendError(res, emailError.message, emailError.statusCode);
     }
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -346,17 +326,7 @@ router.post('/update-password', requireAuth, async (req, res) => {
     }
 
     // Create a client with the user's token
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     const { error } = await userSupabase.auth.updateUser({
       password: password

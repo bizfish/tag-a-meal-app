@@ -1,71 +1,53 @@
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
-const { requireAuth } = require('./auth');
 const router = express.Router();
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+// Import shared utilities
+const { getBaseClient, createAuthenticatedClient } = require('../utils/supabase');
+const { sendSuccess, sendError, handleDatabaseError, asyncHandler } = require('../utils/responses');
+const { validateTagData, validatePagination } = require('../utils/validation');
+const { getResourceUsageCount } = require('../utils/database');
+const { requireAuth } = require('./auth');
+
+const supabase = getBaseClient();
 
 // Get all tags
-router.get('/', async (req, res) => {
-  try {
-    const { search, page = 1, limit = 50 } = req.query;
-    const offset = (page - 1) * limit;
+router.get('/', asyncHandler(async (req, res) => {
+  const { page, limit } = validatePagination(req.query);
+  const { search } = req.query;
+  const offset = (page - 1) * limit;
 
-    // Use authenticated client if token is provided
-    let client = supabase;
-    if (req.headers.authorization) {
-      client = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: req.headers.authorization
-            }
-          }
-        }
-      );
-    }
+  const client = req.headers.authorization ? createAuthenticatedClient(req) : supabase;
 
-    let query = client
-      .from('tags')
-      .select('*')
-      .order('name')
-      .range(offset, offset + limit - 1);
+  let query = client
+    .from('tags')
+    .select('*')
+    .order('name')
+    .range(offset, offset + limit - 1);
 
-    if (search) {
-      query = query.ilike('name', `%${search}%`);
-    }
-
-    const { data: tags, error } = await query;
-
-    if (error) {
-      console.error('Error fetching tags:', error);
-      return res.status(500).json({ error: 'Failed to fetch tags' });
-    }
-
-    res.json({
-      tags,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: tags.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Error in get tags:', error);
-    res.status(500).json({ error: 'Internal server error' });
+  if (search) {
+    query = query.ilike('name', `%${search}%`);
   }
-});
+
+  const { data: tags, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  sendSuccess(res, {
+    tags,
+    pagination: {
+      page,
+      limit,
+      total: tags.length
+    }
+  });
+}));
 
 // Get popular tags (most used)
 router.get('/popular', async (req, res) => {
   try {
-    const { limit = 10 } = req.query;
+    const { limit = 100 } = req.query;
 
     const { data: popularTags, error } = await supabase
       .from('tags')
@@ -150,17 +132,7 @@ router.post('/', requireAuth, async (req, res) => {
     }
 
     // Create a client with the user's token for RLS compliance
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     // Check if tag already exists
     const { data: existing } = await userSupabase

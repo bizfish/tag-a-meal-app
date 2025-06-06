@@ -1,11 +1,11 @@
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
 const router = express.Router();
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+// Import shared utilities
+const { getBaseClient, createAuthenticatedClient } = require('../utils/supabase');
+const { sendSuccess, sendError, handleDatabaseError, asyncHandler } = require('../utils/responses');
+
+const supabase = getBaseClient();
 
 // Unit conversion utilities
 const unitConversions = {
@@ -102,18 +102,7 @@ router.get('/recipes', async (req, res) => {
     // Use authenticated client if token is provided
     let client = supabase;
     if (req.headers.authorization) {
-      const { createClient } = require('@supabase/supabase-js');
-      client = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: req.headers.authorization
-            }
-          }
-        }
-      );
+      client = createAuthenticatedClient(req);
     }
 
     // Build the base query - include user's private recipes if authenticated
@@ -299,7 +288,7 @@ router.get('/recipes', async (req, res) => {
 // Search ingredients
 router.get('/ingredients', async (req, res) => {
   try {
-    const { q, category, page = 1, limit = 50 } = req.query;
+    const { q, category, page = 1, limit = 100 } = req.query;
     const offset = (page - 1) * limit;
 
     let query = supabase
@@ -341,7 +330,7 @@ router.get('/ingredients', async (req, res) => {
 // Search tags
 router.get('/tags', async (req, res) => {
   try {
-    const { q, page = 1, limit = 50 } = req.query;
+    const { q, page = 1, limit = 100 } = req.query;
     const offset = (page - 1) * limit;
 
     let query = supabase
@@ -379,7 +368,7 @@ router.get('/tags', async (req, res) => {
 // Global search (recipes, ingredients, tags)
 router.get('/global', async (req, res) => {
   try {
-    const { q, limit = 10 } = req.query;
+    const { q, limit = 50 } = req.query;
 
     if (!q) {
       return res.status(400).json({ error: 'Search query is required' });
@@ -388,18 +377,7 @@ router.get('/global', async (req, res) => {
     // Use authenticated client if token is provided
     let client = supabase;
     if (req.headers.authorization) {
-      const { createClient } = require('@supabase/supabase-js');
-      client = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY,
-        {
-          global: {
-            headers: {
-              Authorization: req.headers.authorization
-            }
-          }
-        }
-      );
+      client = createAuthenticatedClient(req);
     }
 
     // Build recipe search query
@@ -499,7 +477,7 @@ router.get('/units', (req, res) => {
 // Recipe suggestions based on available ingredients
 router.post('/suggest-recipes', async (req, res) => {
   try {
-    const { ingredients, limit = 10 } = req.body;
+    const { ingredients, limit = 50 } = req.body;
 
     if (!ingredients || !Array.isArray(ingredients) || ingredients.length === 0) {
       return res.status(400).json({ error: 'Ingredients array is required' });

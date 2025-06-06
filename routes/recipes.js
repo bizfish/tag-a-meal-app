@@ -49,17 +49,7 @@ router.get('/my-recipes', requireAuth, async (req, res) => {
     const offset = (page - 1) * limit;
 
     // Create a client with the user's token for RLS compliance
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     let query = userSupabase
       .from('recipes')
@@ -154,17 +144,7 @@ router.post('/', requireAuth, async (req, res) => {
     }
 
     // Create a client with the user's token for RLS compliance
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     // Ensure user profile exists in public.users table
     const { data: existingProfile } = await userSupabase
@@ -304,17 +284,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     } = req.body;
 
     // Create a client with the user's token for RLS compliance
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     // Check if user owns the recipe using user's token context
     const { data: existingRecipes, error: checkError } = await userSupabase
@@ -456,17 +426,7 @@ router.post('/:id/copy', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     // Create a client with the user's token for RLS compliance
-    const userSupabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: req.headers.authorization
-          }
-        }
-      }
-    );
+    const userSupabase = createAuthenticatedClient(req);
 
     // Get the original recipe using user's token context
     const { data: originalRecipes, error: fetchError } = await userSupabase
