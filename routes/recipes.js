@@ -1,166 +1,46 @@
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
-const { requireAuth } = require('./auth');
 const router = express.Router();
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+// Import shared utilities
+const { getBaseClient, createAuthenticatedClient } = require('../utils/supabase');
+const { sendSuccess, sendError, handleDatabaseError, asyncHandler } = require('../utils/responses');
+const { validateRecipeData, validateRatingData, validatePagination } = require('../utils/validation');
+const { 
+  getRecipesWithFilters, 
+  getRecipeById, 
+  upsertRecipeIngredients, 
+  upsertRecipeTags, 
+  ensureUserProfile,
+  checkResourceOwnership,
+  getCurrentUser
+} = require('../utils/database');
+const { requireAuth } = require('./auth');
+
+const supabase = getBaseClient();
 
 // Get all recipes (public + user's own)
-router.get('/', async (req, res) => {
-  try {
-    const { page = 1, limit = 12, search, tags, difficulty, userId, publicOnly } = req.query;
-    const offset = (page - 1) * limit;
-
-    // Create client with user's token if authenticated
-    let clientToUse = supabase;
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    let currentUserId = null;
-    
-    if (token) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser(token);
-        if (user) {
-          currentUserId = user.id;
-          clientToUse = createClient(
-            process.env.SUPABASE_URL,
-            process.env.SUPABASE_ANON_KEY,
-            {
-              global: {
-                headers: {
-                  Authorization: req.headers.authorization
-                }
-              }
-            }
-          );
-        }
-      } catch (error) {
-        console.log('Token validation failed, using anonymous access');
-      }
-    }
-
-    let query = clientToUse
-      .from('recipes')
-      .select(`
-        *,
-        users!recipes_user_id_fkey(full_name, avatar_url, show_author_name),
-        recipe_tags(tags(id, name, color)),
-        recipe_ingredients(
-          id,
-          quantity,
-          unit,
-          notes,
-          ingredients(id, name, category)
-        ),
-        recipe_ratings(rating)
-      `)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    // Apply filters
-    if (search) {
-      query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
-    }
-
-    if (difficulty) {
-      query = query.eq('difficulty', difficulty);
-    }
-
-    if (userId) {
-      query = query.eq('user_id', userId);
-    } else {
-      // Handle publicOnly parameter for front page stats
-      if (publicOnly === 'true') {
-        query = query.eq('is_public', true);
-      } else {
-        // Show public recipes + user's own recipes (if authenticated)
-        if (currentUserId) {
-          query = query.or(`is_public.eq.true,user_id.eq.${currentUserId}`);
-        } else {
-          query = query.eq('is_public', true);
-        }
-      }
-    }
-
-    const { data: recipes, error } = await query;
-
-    if (error) {
-      console.error('Error fetching recipes:', error);
-      return res.status(500).json({ error: 'Failed to fetch recipes' });
-    }
-
-    // Get total count for pagination
-    let countQuery = clientToUse
-      .from('recipes')
-      .select('id', { count: 'exact', head: true });
-
-    // Apply same filters for count
-    if (search) {
-      countQuery = countQuery.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
-    }
-
-    if (difficulty) {
-      countQuery = countQuery.eq('difficulty', difficulty);
-    }
-
-    if (userId) {
-      countQuery = countQuery.eq('user_id', userId);
-    } else {
-      // Handle publicOnly parameter for front page stats
-      if (publicOnly === 'true') {
-        countQuery = countQuery.eq('is_public', true);
-      } else {
-        // Show public recipes + user's own recipes (if authenticated)
-        if (currentUserId) {
-          countQuery = countQuery.or(`is_public.eq.true,user_id.eq.${currentUserId}`);
-        } else {
-          countQuery = countQuery.eq('is_public', true);
-        }
-      }
-    }
-
-    const { count, error: countError } = await countQuery;
-
-    if (countError) {
-      console.error('Error getting recipe count:', countError);
-    }
-
-    // Filter by tags if specified
-    let filteredRecipes = recipes;
-    if (tags) {
-      const tagArray = tags.split(',');
-      filteredRecipes = recipes.filter(recipe => 
-        recipe.recipe_tags.some(rt => 
-          tagArray.includes(rt.tags.name.toLowerCase())
-        )
-      );
-    }
-
-    // Calculate average ratings (privacy is now handled by RLS)
-    const recipesWithRatings = filteredRecipes.map(recipe => ({
-      ...recipe,
-      averageRating: recipe.recipe_ratings.length > 0 
-        ? recipe.recipe_ratings.reduce((sum, r) => sum + r.rating, 0) / recipe.recipe_ratings.length
-        : 0,
-      totalRatings: recipe.recipe_ratings.length
-    }));
-
-    res.json({
-      recipes: recipesWithRatings,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: count || filteredRecipes.length
-      }
-    });
-
-  } catch (error) {
-    console.error('Error in get recipes:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+router.get('/', asyncHandler(async (req, res) => {
+  const { page, limit } = validatePagination(req.query);
+  const { search, tags, difficulty, userId, publicOnly } = req.query;
+  
+  // Get current user if authenticated
+  const currentUser = await getCurrentUser(req);
+  const client = currentUser ? createAuthenticatedClient(req) : supabase;
+  
+  const result = await getRecipesWithFilters({
+    client,
+    page,
+    limit,
+    search,
+    tags,
+    difficulty,
+    userId,
+    publicOnly: publicOnly === 'true',
+    currentUserId: currentUser?.id
+  });
+  
+  sendSuccess(res, result);
+}));
 
 // Get user's own recipes (including private ones)
 router.get('/my-recipes', requireAuth, async (req, res) => {
@@ -235,85 +115,21 @@ router.get('/my-recipes', requireAuth, async (req, res) => {
 });
 
 // Get single recipe by ID
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Create client with user's token if authenticated
-    let clientToUse = supabase;
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    
-    if (token) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser(token);
-        if (user) {
-          clientToUse = createClient(
-            process.env.SUPABASE_URL,
-            process.env.SUPABASE_ANON_KEY,
-            {
-              global: {
-                headers: {
-                  Authorization: req.headers.authorization
-                }
-              }
-            }
-          );
-        }
-      } catch (error) {
-        console.log('Token validation failed, using anonymous access');
-      }
-    }
-
-    const { data: recipes, error } = await clientToUse
-      .from('recipes')
-      .select(`
-        *,
-        users!recipes_user_id_fkey(full_name, avatar_url),
-        recipe_tags(tags(id, name, color)),
-        recipe_ingredients(
-          id,
-          quantity,
-          unit,
-          notes,
-          ingredients(id, name, category)
-        ),
-        recipe_ratings(
-          id,
-          rating,
-          review,
-          created_at,
-          users!recipe_ratings_user_id_fkey(full_name)
-        )
-      `)
-      .eq('id', id);
-
-    if (error) {
-      console.error('Error fetching recipe:', error);
-      return res.status(500).json({ error: 'Failed to fetch recipe' });
-    }
-
-    if (!recipes || recipes.length === 0) {
-      return res.status(404).json({ error: 'Recipe not found' });
-    }
-
-    const recipe = recipes[0];
-
-    // Calculate average rating
-    const averageRating = recipe.recipe_ratings.length > 0 
-      ? recipe.recipe_ratings.reduce((sum, r) => sum + r.rating, 0) / recipe.recipe_ratings.length
-      : 0;
-
-    res.json({
-      ...recipe,
-      averageRating,
-      totalRatings: recipe.recipe_ratings.length
-    });
-
-  } catch (error) {
-    console.error('Error in get recipe:', error);
-    res.status(500).json({ error: 'Internal server error' });
+router.get('/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  // Get current user if authenticated
+  const currentUser = await getCurrentUser(req);
+  const client = currentUser ? createAuthenticatedClient(req) : supabase;
+  
+  const recipe = await getRecipeById(id, client);
+  
+  if (!recipe) {
+    return sendError(res, 'Recipe not found', 404);
   }
-});
+  
+  sendSuccess(res, recipe);
+}));
 
 // Create new recipe
 router.post('/', requireAuth, async (req, res) => {

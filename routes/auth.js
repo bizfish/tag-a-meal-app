@@ -1,12 +1,12 @@
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
-const validator = require('validator');
 const router = express.Router();
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+// Import shared utilities
+const { getBaseClient, createAuthenticatedClient, createServiceClient } = require('../utils/supabase');
+const { sendSuccess, sendError, handleDatabaseError, asyncHandler } = require('../utils/responses');
+const { validateEmail, validatePassword } = require('../utils/validation');
+
+const supabase = getBaseClient();
 
 // Middleware to check if user is authenticated
 const requireAuth = async (req, res, next) => {
@@ -30,153 +30,126 @@ const requireAuth = async (req, res, next) => {
 };
 
 // Register new user
-router.post('/register', async (req, res) => {
-  try {
-    const { email, password, fullName } = req.body;
+router.post('/register', asyncHandler(async (req, res) => {
+  const { email, password, fullName } = req.body;
 
-    // Validation
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
-
-    if (!validator.isEmail(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
-    }
-
-    // Register user with Supabase Auth
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName || ''
-        }
-      }
-    });
-
-    if (error) {
-      console.error('Registration error:', error);
-      return res.status(400).json({ error: error.message });
-    }
-
-    // Create user profile in public.users table
-    if (data.user) {
-      // If session exists, use it for RLS compliance
-      if (data.session) {
-        const userSupabase = createClient(
-          process.env.SUPABASE_URL,
-          process.env.SUPABASE_ANON_KEY,
-          {
-            global: {
-              headers: {
-                Authorization: `Bearer ${data.session.access_token}`
-              }
-            }
-          }
-        );
-
-        const { error: profileError } = await userSupabase
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email: data.user.email,
-            full_name: fullName || '',
-            avatar_url: null
-          });
-
-        if (profileError) {
-          console.error('Profile creation error:', profileError);
-        }
-      } else {
-        // If no session (email confirmation required), use service role
-        const serviceSupabase = createClient(
-          process.env.SUPABASE_URL,
-          process.env.SUPABASE_SERVICE_ROLE_KEY
-        );
-
-        const { error: profileError } = await serviceSupabase
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email: data.user.email,
-            full_name: fullName || '',
-            avatar_url: null
-          });
-
-        if (profileError) {
-          console.error('Profile creation error (service role):', profileError);
-        }
-      }
-    }
-
-    res.status(201).json({
-      message: 'Registration successful',
-      user: {
-        id: data.user?.id,
-        email: data.user?.email,
-        fullName: data.user?.user_metadata?.full_name
-      },
-      session: data.session
-    });
-
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+  // Validation
+  const emailError = validateEmail(email);
+  if (emailError) {
+    return sendError(res, emailError.message, emailError.statusCode);
   }
-});
+
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    return sendError(res, passwordError.message, passwordError.statusCode);
+  }
+
+  // Register user with Supabase Auth
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: fullName || ''
+      }
+    }
+  });
+
+  if (error) {
+    console.error('Registration error:', error);
+    return sendError(res, error.message, 400);
+  }
+
+  // Create user profile in public.users table
+  if (data.user) {
+    // If session exists, use it for RLS compliance
+    if (data.session) {
+      const userSupabase = createAuthenticatedClient({ headers: { authorization: `Bearer ${data.session.access_token}` } });
+
+      const { error: profileError } = await userSupabase
+        .from('users')
+        .insert({
+          id: data.user.id,
+          email: data.user.email,
+          full_name: fullName || '',
+          avatar_url: null
+        });
+
+      if (profileError) {
+        console.error('Profile creation error:', profileError);
+      }
+    } else {
+      // If no session (email confirmation required), use service role
+      const serviceSupabase = createServiceClient();
+
+      const { error: profileError } = await serviceSupabase
+        .from('users')
+        .insert({
+          id: data.user.id,
+          email: data.user.email,
+          full_name: fullName || '',
+          avatar_url: null
+        });
+
+      if (profileError) {
+        console.error('Profile creation error (service role):', profileError);
+      }
+    }
+  }
+
+  sendSuccess(res, {
+    user: {
+      id: data.user?.id,
+      email: data.user?.email,
+      fullName: data.user?.user_metadata?.full_name
+    },
+    session: data.session
+  }, 'Registration successful', 201);
+}));
 
 // Login user
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
+router.post('/login', asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
 
-    // Validation
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
-
-    if (!validator.isEmail(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
-
-    // Sign in with Supabase Auth
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
-
-    if (error) {
-      console.error('Login error:', error);
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Get user profile
-    const { data: profile } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', data.user.id)
-      .single();
-
-    res.json({
-      message: 'Login successful',
-      user: {
-        id: data.user.id,
-        email: data.user.email,
-        fullName: profile?.full_name || data.user.user_metadata?.full_name,
-        avatarUrl: profile?.avatar_url
-      },
-      session: data.session
-    });
-
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+  // Validation
+  const emailError = validateEmail(email);
+  if (emailError) {
+    return sendError(res, emailError.message, emailError.statusCode);
   }
-});
+
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    return sendError(res, passwordError.message, passwordError.statusCode);
+  }
+
+  // Sign in with Supabase Auth
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password
+  });
+
+  if (error) {
+    console.error('Login error:', error);
+    return sendError(res, 'Invalid credentials', 401);
+  }
+
+  // Get user profile
+  const { data: profile } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', data.user.id)
+    .single();
+
+  sendSuccess(res, {
+    user: {
+      id: data.user.id,
+      email: data.user.email,
+      fullName: profile?.full_name || data.user.user_metadata?.full_name,
+      avatarUrl: profile?.avatar_url
+    },
+    session: data.session
+  }, 'Login successful');
+}));
 
 // Logout user
 router.post('/logout', async (req, res) => {
