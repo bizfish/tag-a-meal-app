@@ -1,0 +1,126 @@
+# Tag-a-Meal Caddyfile
+# This configuration serves the Tag-a-Meal application using Caddy web server
+
+# Replace 'your-domain.com' with your actual domain
+# For local development, you can use 'localhost:8080' or any other port
+your-domain.com {
+    # Reverse proxy to the Node.js application
+    reverse_proxy localhost:3000
+
+    # Enable gzip compression
+    encode gzip
+
+    # Security headers
+    header {
+        # Prevent clickjacking
+        X-Frame-Options DENY
+        
+        # Prevent MIME type sniffing
+        X-Content-Type-Options nosniff
+        
+        # Enable XSS protection
+        X-XSS-Protection "1; mode=block"
+        
+        # Strict transport security (HTTPS only)
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        
+        # Content security policy
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none';"
+        
+        # Remove server information
+        -Server
+    }
+
+    # Rate limiting for API endpoints
+    rate_limit {
+        zone api {
+            key {remote_host}
+            events 100
+            window 1m
+        }
+        
+        zone auth {
+            key {remote_host}
+            events 10
+            window 1m
+        }
+    }
+
+    # Apply rate limiting to specific paths
+    @api path /api/*
+    rate_limit @api api
+
+    @auth path /api/auth/*
+    rate_limit @auth auth
+
+    # Cache static assets
+    @static {
+        path *.css *.js *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
+    }
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    # Log access and errors
+    log {
+        output file /var/log/caddy/tag-a-meal-access.log
+        format json
+    }
+
+    # Handle errors gracefully
+    handle_errors {
+        @404 expression {http.error.status_code} == 404
+        handle @404 {
+            rewrite * /
+            reverse_proxy localhost:3000
+        }
+        
+        @5xx expression {http.error.status_code} >= 500
+        handle @5xx {
+            respond "Service temporarily unavailable" 503
+        }
+    }
+}
+
+# Alternative configuration for local development
+# Uncomment the section below and comment out the domain section above for local testing
+
+# localhost:8080 {
+#     reverse_proxy localhost:3000
+#     
+#     encode gzip
+#     
+#     # Basic security headers for development
+#     header {
+#         X-Frame-Options DENY
+#         X-Content-Type-Options nosniff
+#         X-XSS-Protection "1; mode=block"
+#     }
+#     
+#     # Cache static assets
+#     @static {
+#         path *.css *.js *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
+#     }
+#     header @static Cache-Control "public, max-age=3600"
+#     
+#     # SPA routing - serve index.html for all non-API routes
+#     @spa {
+#         not path /api/*
+#         file {
+#             try_files {path} /
+#         }
+#     }
+#     handle @spa {
+#         reverse_proxy localhost:3000
+#     }
+# }
+
+# Global options
+{
+    # Email for Let's Encrypt (replace with your email)
+    email your-email@example.com
+    
+    # Enable automatic HTTPS
+    auto_https on
+    
+    # Admin API endpoint (optional, for monitoring)
+    admin localhost:2019
+}

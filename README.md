@@ -220,12 +220,172 @@ tag-a-meal/
 4. Set up proper CORS settings
 5. Configure file upload limits
 
-### Recommended Hosting
+### Using Caddy Web Server (Recommended)
 
-- **Backend**: Heroku, Railway, or DigitalOcean
+This project includes a `Caddyfile` for easy deployment with Caddy web server, which provides automatic HTTPS, security headers, and performance optimizations.
+
+#### Prerequisites
+
+1. **Install Caddy**: Follow the installation guide at [caddyserver.com](https://caddyserver.com/docs/install)
+2. **Domain Setup**: Point your domain's DNS to your server's IP address
+
+#### Configuration Steps
+
+1. **Update the Caddyfile**:
+   ```bash
+   # Edit the Caddyfile in the project root
+   nano Caddyfile
+   ```
+   
+   Replace the following placeholders:
+   - `your-domain.com` with your actual domain name
+   - `your-email@example.com` with your email for Let's Encrypt certificates
+
+2. **For Production Deployment**:
+   ```bash
+   # Start your Node.js application
+   npm start
+   
+   # In another terminal, start Caddy
+   sudo caddy run --config Caddyfile
+   ```
+
+3. **For Local Development**:
+   ```bash
+   # Edit Caddyfile to uncomment the localhost section and comment out the domain section
+   # Then start your Node.js application
+   npm run dev
+   
+   # Start Caddy for local testing
+   caddy run --config Caddyfile
+   ```
+   
+   Your app will be available at `http://localhost:8080`
+
+#### Caddy Features Included
+
+- **Automatic HTTPS**: Let's Encrypt certificates are automatically obtained and renewed
+- **Security Headers**: Comprehensive security headers including CSP, HSTS, and XSS protection
+- **Rate Limiting**: API endpoints are rate-limited to prevent abuse
+- **Gzip Compression**: Automatic compression for better performance
+- **Static Asset Caching**: Long-term caching for CSS, JS, and image files
+- **Error Handling**: Graceful error pages and SPA routing support
+- **Logging**: Access logs in JSON format for monitoring
+
+#### Systemd Service (Linux)
+
+For production deployment, create a systemd service:
+
+1. **Create service file**:
+   ```bash
+   sudo nano /etc/systemd/system/tag-a-meal.service
+   ```
+   
+   ```ini
+   [Unit]
+   Description=Tag-a-Meal Recipe App
+   After=network.target
+   
+   [Service]
+   Type=simple
+   User=www-data
+   WorkingDirectory=/path/to/tag-a-meal
+   ExecStart=/usr/bin/node server.js
+   Restart=always
+   RestartSec=10
+   Environment=NODE_ENV=production
+   EnvironmentFile=/path/to/tag-a-meal/.env
+   
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+2. **Create Caddy service file**:
+   ```bash
+   sudo nano /etc/systemd/system/caddy-tag-a-meal.service
+   ```
+   
+   ```ini
+   [Unit]
+   Description=Caddy web server for Tag-a-Meal
+   After=network.target tag-a-meal.service
+   Requires=tag-a-meal.service
+   
+   [Service]
+   Type=simple
+   User=caddy
+   Group=caddy
+   WorkingDirectory=/path/to/tag-a-meal
+   ExecStart=/usr/bin/caddy run --config Caddyfile
+   Restart=always
+   RestartSec=10
+   
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+3. **Enable and start services**:
+   ```bash
+   sudo systemctl enable tag-a-meal caddy-tag-a-meal
+   sudo systemctl start tag-a-meal caddy-tag-a-meal
+   ```
+
+### Alternative Hosting Options
+
+- **Backend**: Heroku, Railway, DigitalOcean, or VPS with Caddy
 - **Database**: Supabase (managed PostgreSQL)
 - **File Storage**: Supabase Storage or AWS S3
 - **CDN**: Cloudflare or AWS CloudFront
+
+### Docker Deployment
+
+For containerized deployment, you can use Docker with Caddy:
+
+```dockerfile
+# Dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  app:
+    build: .
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+```
 
 ## Contributing
 

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "setup-db": "node scripts/setup-database.js"
+    "setup-db": "node scripts/setup-database.js",
+    "reset-db": "node scripts/reset-database.js"
   },
   "keywords": ["recipes", "food", "cooking", "supabase", "node"],
   "author": "",
