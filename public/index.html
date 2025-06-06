@@ -128,10 +128,6 @@
                 <div class="filters-section">
                     <div class="filters-container">
                         <div class="filter-group">
-                            <label>Search</label>
-                            <input type="text" id="recipeSearch" placeholder="Search recipes...">
-                        </div>
-                        <div class="filter-group">
                             <label>Difficulty</label>
                             <select id="difficultyFilter">
                                 <option value="">All</option>
@@ -144,6 +140,20 @@
                             <label>Tags</label>
                             <div id="tagFilters" class="tag-filters">
                                 <!-- Tag filters will be loaded here -->
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <label>Ingredients</label>
+                            <div class="ingredient-filters">
+                                <div class="ingredient-filter-input">
+                                    <input type="text" id="ingredientFilterSearch" placeholder="Search ingredients... (left click = include, right click = exclude)">
+                                    <div id="ingredientFilterDropdown" class="ingredient-filter-dropdown">
+                                        <!-- Ingredient suggestions will appear here -->
+                                    </div>
+                                </div>
+                                <div id="selectedIngredientFilters" class="selected-ingredient-filters">
+                                    <!-- Selected ingredient pills will appear here -->
+                                </div>
                             </div>
                         </div>
                         <div class="filter-group">
@@ -260,6 +270,9 @@
                         <button type="button" id="addIngredientBtn" class="btn btn-secondary">
                             <i class="fas fa-plus"></i> Add Ingredient
                         </button>
+                        
+                        <!-- Ingredient suggestions container -->
+                        <div id="ingredientSuggestions" class="ingredient-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: var(--surface-color); border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 var(--border-radius) var(--border-radius); max-height: 200px; overflow-y: auto; z-index: 1000; display: none;"></div>
                     </div>
                     
                     <div class="form-section">
@@ -292,8 +305,18 @@ Example:
                     
                     <div class="form-section">
                         <h3>Tags</h3>
-                        <div id="recipeTags" class="recipe-tags">
-                            <!-- Tags will be loaded here -->
+                        <div class="tag-input-section" style="margin-bottom: 1rem;">
+                            <label for="tagInput">Add Tags</label>
+                            <div class="tag-input-container" style="position: relative;">
+                                <input type="text" id="tagInput" placeholder="Type to search or create tags..." style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: var(--border-radius);">
+                                <div id="tagSuggestions" class="tag-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: var(--surface-color); border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 var(--border-radius) var(--border-radius); max-height: 200px; overflow-y: auto; z-index: 1000; display: none;"></div>
+                            </div>
+                            <div id="selectedTags" class="selected-tags" style="margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                <!-- Selected tags will appear here -->
+                            </div>
+                        </div>
+                        <div id="recipeTags" class="recipe-tags" style="display: none;">
+                            <!-- Tags will be loaded here for backward compatibility -->
                         </div>
                     </div>
                     

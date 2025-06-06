@@ -14,7 +14,23 @@ router.get('/', async (req, res) => {
     const { search, category, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
+    // Use authenticated client if token is provided
+    let client = supabase;
+    if (req.headers.authorization) {
+      client = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY,
+        {
+          global: {
+            headers: {
+              Authorization: req.headers.authorization
+            }
+          }
+        }
+      );
+    }
+
+    let query = client
       .from('ingredients')
       .select('*')
       .order('name')
@@ -108,18 +124,31 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Ingredient name is required' });
     }
 
+    // Create a client with the user's token for RLS compliance
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
+
     // Check if ingredient already exists
-    const { data: existing } = await supabase
+    const { data: existing } = await userSupabase
       .from('ingredients')
       .select('id')
-      .eq('name', name)
+      .eq('name', name.trim())
       .single();
 
     if (existing) {
       return res.status(409).json({ error: 'Ingredient already exists' });
     }
 
-    const { data: ingredient, error } = await supabase
+    const { data: ingredient, error } = await userSupabase
       .from('ingredients')
       .insert({
         name: name.trim(),

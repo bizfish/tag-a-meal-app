@@ -14,7 +14,23 @@ router.get('/', async (req, res) => {
     const { search, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
+    // Use authenticated client if token is provided
+    let client = supabase;
+    if (req.headers.authorization) {
+      client = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY,
+        {
+          global: {
+            headers: {
+              Authorization: req.headers.authorization
+            }
+          }
+        }
+      );
+    }
+
+    let query = client
       .from('tags')
       .select('*')
       .order('name')
@@ -133,8 +149,21 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Tag name is required' });
     }
 
+    // Create a client with the user's token for RLS compliance
+    const userSupabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.authorization
+          }
+        }
+      }
+    );
+
     // Check if tag already exists
-    const { data: existing } = await supabase
+    const { data: existing } = await userSupabase
       .from('tags')
       .select('id')
       .eq('name', name.trim())
@@ -148,7 +177,7 @@ router.post('/', requireAuth, async (req, res) => {
     const colorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
     const tagColor = color && colorRegex.test(color) ? color : '#3B82F6';
 
-    const { data: tag, error } = await supabase
+    const { data: tag, error } = await userSupabase
       .from('tags')
       .insert({
         name: name.trim(),

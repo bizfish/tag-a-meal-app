@@ -99,12 +99,29 @@ router.get('/recipes', async (req, res) => {
 
     const offset = (page - 1) * limit;
 
-    // Build the base query
-    let query = supabase
+    // Use authenticated client if token is provided
+    let client = supabase;
+    if (req.headers.authorization) {
+      const { createClient } = require('@supabase/supabase-js');
+      client = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY,
+        {
+          global: {
+            headers: {
+              Authorization: req.headers.authorization
+            }
+          }
+        }
+      );
+    }
+
+    // Build the base query - include user's private recipes if authenticated
+    let query = client
       .from('recipes')
       .select(`
         *,
-        users!recipes_user_id_fkey(full_name, avatar_url),
+        users!recipes_user_id_fkey(full_name, avatar_url, show_author_name),
         recipe_tags(tags(id, name, color)),
         recipe_ingredients(
           id,
@@ -114,8 +131,12 @@ router.get('/recipes', async (req, res) => {
           ingredients(id, name, category)
         ),
         recipe_ratings(rating)
-      `)
-      .eq('is_public', true);
+      `);
+
+    // If not authenticated, only show public recipes
+    if (!req.headers.authorization) {
+      query = query.eq('is_public', true);
+    }
 
     // Apply filters
     if (q) {
@@ -180,6 +201,30 @@ router.get('/recipes', async (req, res) => {
         recipe.recipe_ingredients.some(ri =>
           ingredientList.some(searchIngredient =>
             ri.ingredients.name.toLowerCase().includes(searchIngredient)
+          )
+        )
+      );
+    }
+
+    // Filter by include ingredients (must have ALL specified ingredients)
+    if (req.query.includeIngredients) {
+      const includeList = req.query.includeIngredients.split(',').map(i => i.trim().toLowerCase());
+      filteredRecipes = filteredRecipes.filter(recipe =>
+        includeList.every(searchIngredient =>
+          recipe.recipe_ingredients.some(ri =>
+            ri.ingredients && ri.ingredients.name && ri.ingredients.name.toLowerCase().includes(searchIngredient)
+          )
+        )
+      );
+    }
+
+    // Filter by exclude ingredients (must NOT have ANY specified ingredients)
+    if (req.query.excludeIngredients) {
+      const excludeList = req.query.excludeIngredients.split(',').map(i => i.trim().toLowerCase());
+      filteredRecipes = filteredRecipes.filter(recipe =>
+        !excludeList.some(searchIngredient =>
+          recipe.recipe_ingredients.some(ri =>
+            ri.ingredients && ri.ingredients.name && ri.ingredients.name.toLowerCase().includes(searchIngredient)
           )
         )
       );
@@ -340,16 +385,39 @@ router.get('/global', async (req, res) => {
       return res.status(400).json({ error: 'Search query is required' });
     }
 
-    // Search recipes
-    const { data: recipes } = await supabase
+    // Use authenticated client if token is provided
+    let client = supabase;
+    if (req.headers.authorization) {
+      const { createClient } = require('@supabase/supabase-js');
+      client = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY,
+        {
+          global: {
+            headers: {
+              Authorization: req.headers.authorization
+            }
+          }
+        }
+      );
+    }
+
+    // Build recipe search query
+    let recipeQuery = client
       .from('recipes')
       .select(`
         id, title, description, image_url,
         users!recipes_user_id_fkey(full_name)
       `)
-      .eq('is_public', true)
-      .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+      .or(`title.ilike.%${q}%,description.ilike.%${q}%,instructions.ilike.%${q}%`)
       .limit(parseInt(limit));
+
+    // If not authenticated, only show public recipes
+    if (!req.headers.authorization) {
+      recipeQuery = recipeQuery.eq('is_public', true);
+    }
+
+    const { data: recipes } = await recipeQuery;
 
     // Search ingredients
     const { data: ingredients } = await supabase

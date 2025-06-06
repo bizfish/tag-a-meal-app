@@ -31,19 +31,27 @@ class AppState {
         const userAvatar = document.getElementById('userAvatar');
         
         if (this.user) {
-            userName.textContent = this.user.fullName || this.user.email;
-            updateAvatarDisplay(userAvatar, this.user.avatarUrl, 'user');
+            if (userName) {
+                userName.textContent = this.user.fullName || this.user.email;
+            }
+            if (userAvatar) {
+                updateAvatarDisplay(userAvatar, this.user.avatarUrl, 'user');
+            }
             this.showAuthenticatedUI();
         } else {
-            userName.textContent = 'Guest';
-            userAvatar.style.display = 'none';
-            // Add Material Icons fallback for guest
-            if (!userAvatar.nextElementSibling || !userAvatar.nextElementSibling.classList.contains('material-icons')) {
-                const iconFallback = document.createElement('span');
-                iconFallback.className = 'material-icons user-avatar-fallback';
-                iconFallback.textContent = 'account_circle';
-                iconFallback.style.cssText = 'font-size: 32px; color: var(--text-secondary); border-radius: 50%;';
-                userAvatar.parentNode.insertBefore(iconFallback, userAvatar.nextSibling);
+            if (userName) {
+                userName.textContent = 'Guest';
+            }
+            if (userAvatar) {
+                userAvatar.style.display = 'none';
+                // Add Material Icons fallback for guest
+                if (!userAvatar.nextElementSibling || !userAvatar.nextElementSibling.classList.contains('material-icons')) {
+                    const iconFallback = document.createElement('span');
+                    iconFallback.className = 'material-icons user-avatar-fallback';
+                    iconFallback.textContent = 'account_circle';
+                    iconFallback.style.cssText = 'font-size: 32px; color: var(--text-secondary); border-radius: 50%;';
+                    userAvatar.parentNode.insertBefore(iconFallback, userAvatar.nextSibling);
+                }
             }
             this.showGuestUI();
         }
@@ -752,16 +760,317 @@ function renderTagFilters(tags) {
     });
 }
 
-function renderRecipeTagsForm() {
-    const container = document.getElementById('recipeTags');
-    if (!container) return;
+// Shared Typeahead System
+class TypeaheadSystem {
+    constructor(type, config) {
+        this.type = type; // 'tags' or 'ingredients'
+        this.config = config;
+        this.allItems = [];
+        this.selectedItems = type === 'tags' ? [] : null; // Only tags have selection
+        this.searchTimeout = null;
+        this.apiEndpoint = type === 'tags' ? 'getTags' : 'getIngredients';
+        this.createEndpoint = type === 'tags' ? 'createTag' : 'createIngredient';
+    }
 
-    container.innerHTML = app.tags.map(tag => `
-        <label class="tag-checkbox">
-            <input type="checkbox" value="${tag.id}" name="recipeTags">
-            <span class="tag" style="background-color: ${tag.color}">${tag.name}</span>
-        </label>
-    `).join('');
+    async loadAllItems() {
+        try {
+            const response = await api[this.apiEndpoint]();
+            this.allItems = response[this.type] || [];
+        } catch (error) {
+            console.error(`Error loading ${this.type}:`, error);
+            this.allItems = [];
+        }
+    }
+
+    async initialize(inputElement, suggestionsContainer) {
+        if (!inputElement || !suggestionsContainer) {
+            console.log(`TypeaheadSystem (${this.type}): Missing elements`, { inputElement, suggestionsContainer });
+            return;
+        }
+        
+        console.log(`TypeaheadSystem (${this.type}): Initializing with`, { inputElement, suggestionsContainer });
+        
+        // Load items if not already loaded
+        if (this.allItems.length === 0) {
+            console.log(`TypeaheadSystem (${this.type}): Loading items...`);
+            await this.loadAllItems();
+            console.log(`TypeaheadSystem (${this.type}): Loaded ${this.allItems.length} items`);
+        }
+        
+        // Add event listeners
+        inputElement.addEventListener('input', (e) => this.handleInput(e, suggestionsContainer));
+        inputElement.addEventListener('keydown', (e) => this.handleKeydown(e, suggestionsContainer, inputElement));
+        
+        // Hide suggestions when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest(this.config.containerSelector)) {
+                if (suggestionsContainer) {
+                    suggestionsContainer.style.display = 'none';
+                }
+            }
+        });
+    }
+
+    handleInput(event, suggestionsContainer) {
+        const query = event.target.value.trim();
+        
+        clearTimeout(this.searchTimeout);
+        
+        if (query.length === 0) {
+            suggestionsContainer.style.display = 'none';
+            return;
+        }
+        
+        this.searchTimeout = setTimeout(() => {
+            this.showSuggestions(query, suggestionsContainer, event.target);
+        }, 200);
+    }
+
+    handleKeydown(event, suggestionsContainer, inputElement) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            const query = event.target.value.trim();
+            if (query) {
+                const existingItem = this.allItems.find(item => 
+                    item.name.toLowerCase() === query.toLowerCase()
+                );
+                if (existingItem) {
+                    this.selectItem(existingItem, inputElement);
+                } else {
+                    this.createAndSelectItem(query, inputElement);
+                }
+                if (this.type === 'tags') {
+                    event.target.value = '';
+                }
+                suggestionsContainer.style.display = 'none';
+            }
+        }
+    }
+
+    showSuggestions(query, suggestionsContainer, inputElement) {
+        // Filter existing items
+        let matchingItems = this.allItems.filter(item => 
+            item.name.toLowerCase().includes(query.toLowerCase())
+        );
+
+        // For tags, exclude already selected ones
+        if (this.type === 'tags' && this.selectedItems) {
+            matchingItems = matchingItems.filter(item =>
+                !this.selectedItems.some(selected => selected.id === item.id)
+            );
+        }
+        
+        let html = '';
+        
+        // Show matching existing items
+        matchingItems.slice(0, 5).forEach(item => {
+            if (this.type === 'tags') {
+                html += `
+                    <div class="tag-suggestion" data-item-id="${item.id}">
+                        <span class="tag" style="background-color: ${item.color}">${item.name}</span>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="ingredient-suggestion" data-item-name="${item.name}">
+                        <span>${item.name}</span>
+                        ${item.category ? `<span class="ingredient-category">${item.category}</span>` : ''}
+                    </div>
+                `;
+            }
+        });
+        
+        // Show "create new" option if no exact match
+        const exactMatch = this.allItems.find(item => 
+            item.name.toLowerCase() === query.toLowerCase()
+        );
+        if (!exactMatch) {
+            const suggestionClass = this.type === 'tags' ? 'tag-suggestion' : 'ingredient-suggestion';
+            html += `
+                <div class="${suggestionClass} create-new" data-create-item="${query}">
+                    <i class="fas fa-plus"></i>
+                    <span>Create "${query}"</span>
+                </div>
+            `;
+        }
+        
+        if (html) {
+            const suggestionClass = this.type === 'tags' ? 'tag-suggestion' : 'ingredient-suggestion';
+            suggestionsContainer.innerHTML = html;
+            suggestionsContainer.style.display = 'block';
+            
+            // Add click handlers
+            suggestionsContainer.querySelectorAll(`.${suggestionClass}`).forEach(suggestion => {
+                suggestion.addEventListener('click', () => {
+                    this.handleSuggestionClick(suggestion, inputElement, suggestionsContainer);
+                });
+            });
+        } else {
+            suggestionsContainer.style.display = 'none';
+        }
+    }
+
+    handleSuggestionClick(suggestion, inputElement, suggestionsContainer) {
+        const itemId = suggestion.dataset.itemId;
+        const itemName = suggestion.dataset.itemName;
+        const createItem = suggestion.dataset.createItem;
+        
+        if (itemId || itemName) {
+            // Use existing item
+            const item = this.allItems.find(i => i.id === itemId || i.name === itemName);
+            if (item) {
+                this.selectItem(item, inputElement);
+            }
+        } else if (createItem) {
+            // Create new item
+            this.createAndSelectItem(createItem, inputElement);
+        }
+        
+        if (this.type === 'tags') {
+            inputElement.value = '';
+        }
+        suggestionsContainer.style.display = 'none';
+    }
+
+    selectItem(item, inputElement) {
+        if (this.type === 'tags') {
+            this.addSelectedTag(item);
+        } else {
+            inputElement.value = item.name;
+        }
+    }
+
+    async createAndSelectItem(name, inputElement) {
+        try {
+            let createData = { name };
+            
+            // Add type-specific data
+            if (this.type === 'tags') {
+                const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
+                createData.color = colors[Math.floor(Math.random() * colors.length)];
+            }
+            
+            const response = await api[this.createEndpoint](createData);
+            const newItem = response[this.type.slice(0, -1)]; // 'tags' -> 'tag', 'ingredients' -> 'ingredient'
+            
+            // Add to allItems array
+            this.allItems.push(newItem);
+            
+            // Select the new item
+            this.selectItem(newItem, inputElement);
+            
+            const itemType = this.type.slice(0, -1); // Remove 's'
+            showToast(`Created new ${itemType} "${name}"`, 'success');
+        } catch (error) {
+            console.error(`Error creating ${this.type.slice(0, -1)}:`, error);
+            if (this.type === 'ingredients') {
+                // Still allow the user to use the ingredient name even if creation failed
+                inputElement.value = name;
+                showToast('Ingredient name saved (creation failed)', 'warning');
+            } else {
+                showToast(`Failed to create ${this.type.slice(0, -1)}`, 'error');
+            }
+        }
+    }
+
+    // Tag-specific methods
+    addSelectedTag(tag) {
+        if (this.type !== 'tags') return;
+        
+        // Check if already selected
+        if (this.selectedItems.some(selected => selected.id === tag.id)) {
+            return;
+        }
+        
+        this.selectedItems.push(tag);
+        this.renderSelectedTags();
+    }
+
+    renderSelectedTags() {
+        if (this.type !== 'tags') return;
+        
+        const container = document.getElementById('selectedTags');
+        if (!container) return;
+        
+        container.innerHTML = this.selectedItems.map(tag => `
+            <div class="selected-tag" style="background-color: ${tag.color}">
+                <span>${tag.name}</span>
+                <button type="button" class="remove-tag" data-tag-id="${tag.id}">&times;</button>
+            </div>
+        `).join('');
+        
+        // Add remove handlers
+        container.querySelectorAll('.remove-tag').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tagId = e.target.dataset.tagId;
+                this.removeSelectedTag(tagId);
+            });
+        });
+    }
+
+    removeSelectedTag(tagId) {
+        if (this.type !== 'tags') return;
+        
+        this.selectedItems = this.selectedItems.filter(tag => tag.id !== tagId);
+        this.renderSelectedTags();
+    }
+
+    clearSelectedTags() {
+        if (this.type !== 'tags') return;
+        
+        this.selectedItems = [];
+        this.renderSelectedTags();
+    }
+
+    getSelectedTagIds() {
+        if (this.type !== 'tags') return [];
+        
+        return this.selectedItems.map(tag => tag.id);
+    }
+}
+
+// Create instances for tags and ingredients
+const tagTypeahead = new TypeaheadSystem('tags', {
+    containerSelector: '.tag-input-container'
+});
+
+const ingredientTypeahead = new TypeaheadSystem('ingredients', {
+    containerSelector: '.ingredient-item'
+});
+
+// Tag system functions (using shared typeahead)
+async function initializeTagInput() {
+    const tagInput = document.getElementById('tagInput');
+    const tagSuggestions = document.getElementById('tagSuggestions');
+    
+    if (!tagInput) {
+        console.log('Tag input element not found');
+        return;
+    }
+    
+    console.log('Initializing tag input...');
+    await tagTypeahead.initialize(tagInput, tagSuggestions);
+}
+
+function addSelectedTag(tag) {
+    tagTypeahead.addSelectedTag(tag);
+}
+
+function removeSelectedTag(tagId) {
+    tagTypeahead.removeSelectedTag(tagId);
+}
+
+function clearSelectedTags() {
+    tagTypeahead.clearSelectedTags();
+}
+
+function getSelectedTagIds() {
+    return tagTypeahead.getSelectedTagIds();
+}
+
+// Legacy function for backward compatibility
+function renderRecipeTagsForm() {
+    initializeTagInput();
 }
 
 function renderIngredientsDatalist() {
@@ -782,8 +1091,9 @@ function addIngredientRow() {
     const isFirstIngredient = container.children.length === 0;
     
     row.innerHTML = `
-        <div class="form-group">
-            <input type="text" placeholder="Ingredient name" class="ingredient-name" list="ingredientsDatalist" ${isFirstIngredient ? 'required' : ''}>
+        <div class="form-group" style="position: relative;">
+            <input type="text" placeholder="Ingredient name" class="ingredient-name" ${isFirstIngredient ? 'required' : ''}>
+            <div class="ingredient-suggestions-container" style="position: absolute; top: 100%; left: 0; right: 0; z-index: 1000; display: none;"></div>
         </div>
         <div class="form-group">
             <input type="number" placeholder="Quantity" class="ingredient-quantity" step="0.01">
@@ -805,6 +1115,10 @@ function addIngredientRow() {
     removeBtn.addEventListener('click', () => {
         removeIngredientRow(removeBtn);
     });
+    
+    // Add ingredient typeahead functionality
+    const ingredientInput = row.querySelector('.ingredient-name');
+    initializeIngredientTypeahead(ingredientInput);
     
     // Update remove button visibility for all ingredients
     updateIngredientRemoveButtons();
@@ -1015,9 +1329,8 @@ async function handleRecipeSubmit(event) {
             }
         });
         
-        // Collect selected tags
-        const tags = Array.from(document.querySelectorAll('input[name="recipeTags"]:checked'))
-            .map(input => input.value);
+        // Collect selected tags from new tag system
+        const tags = getSelectedTagIds();
         
         const recipeData = {
             title: document.getElementById('recipeTitle').value,
@@ -1258,10 +1571,12 @@ function populateRecipeForm(recipe, options = {}) {
         addIngredientRow();
     }
     
-    // Populate tags
+    // Populate tags with new tag system
+    clearSelectedTags();
     recipe.recipe_tags.forEach(rt => {
-        const checkbox = document.querySelector(`input[value="${rt.tags.id}"]`);
-        if (checkbox) checkbox.checked = true;
+        if (rt.tags) {
+            addSelectedTag(rt.tags);
+        }
     });
     
     // Populate image
@@ -1344,17 +1659,21 @@ async function deleteRecipe(recipeId) {
 }
 
 async function filterRecipes() {
-    const search = document.getElementById('recipeSearch').value;
     const difficulty = document.getElementById('difficultyFilter').value;
     const sortBy = document.getElementById('sortBy').value;
     
     const activeTags = Array.from(document.querySelectorAll('.tag-filter.active'))
         .map(filter => filter.dataset.tag);
     
+    // Get ingredient filters from the new system
+    const includeIngredients = ingredientFilterState.includeIngredients.map(ing => ing.name).join(',');
+    const excludeIngredients = ingredientFilterState.excludeIngredients.map(ing => ing.name).join(',');
+    
     const params = {};
-    if (search) params.q = search;
     if (difficulty) params.difficulty = difficulty;
     if (activeTags.length > 0) params.tags = activeTags.join(',');
+    if (includeIngredients) params.includeIngredients = includeIngredients;
+    if (excludeIngredients) params.excludeIngredients = excludeIngredients;
     if (sortBy) params.sortBy = sortBy;
     
     try {
@@ -1635,19 +1954,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     
     // Recipe filters
-    const recipeSearch = document.getElementById('recipeSearch');
     const difficultyFilter = document.getElementById('difficultyFilter');
     const sortBy = document.getElementById('sortBy');
     
-    if (recipeSearch) {
-        recipeSearch.addEventListener('input', debounce(filterRecipes, 300));
-    }
     if (difficultyFilter) {
         difficultyFilter.addEventListener('change', filterRecipes);
     }
     if (sortBy) {
         sortBy.addEventListener('change', filterRecipes);
     }
+    
+    // Initialize ingredient filter system
+    initializeIngredientFilter();
     
     // Profile form
     const profileForm = document.getElementById('profileForm');
@@ -1919,6 +2237,189 @@ function updateInstructionsPreview() {
     }
 }
 
+// Ingredient system functions (using shared typeahead)
+async function initializeIngredientTypeahead(inputElement) {
+    if (!inputElement) {
+        console.log('No input element provided to initializeIngredientTypeahead');
+        return;
+    }
+    
+    const suggestionsContainer = inputElement.parentElement.querySelector('.ingredient-suggestions-container');
+    if (!suggestionsContainer) {
+        console.log('No suggestions container found for ingredient input');
+        return;
+    }
+    
+    console.log('Initializing ingredient typeahead for:', inputElement);
+    await ingredientTypeahead.initialize(inputElement, suggestionsContainer);
+}
+
+// Ingredient Filter System
+let ingredientFilterState = {
+    includeIngredients: [],
+    excludeIngredients: [],
+    allIngredients: []
+};
+
+async function initializeIngredientFilter() {
+    const filterInput = document.getElementById('ingredientFilterSearch');
+    const dropdown = document.getElementById('ingredientFilterDropdown');
+    const selectedContainer = document.getElementById('selectedIngredientFilters');
+    
+    if (!filterInput || !dropdown || !selectedContainer) {
+        console.log('Ingredient filter elements not found');
+        return;
+    }
+    
+    // Load all ingredients
+    try {
+        const response = await api.getIngredients();
+        ingredientFilterState.allIngredients = response.ingredients || [];
+    } catch (error) {
+        console.error('Error loading ingredients for filter:', error);
+        ingredientFilterState.allIngredients = [];
+    }
+    
+    // Add event listeners
+    filterInput.addEventListener('input', debounce(handleIngredientFilterInput, 200));
+    filterInput.addEventListener('focus', handleIngredientFilterInput);
+    
+    // Hide dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.ingredient-filter-input')) {
+            dropdown.style.display = 'none';
+        }
+    });
+    
+    // Initial render
+    renderSelectedIngredientFilters();
+}
+
+function handleIngredientFilterInput(event) {
+    const query = event.target.value.trim().toLowerCase();
+    const dropdown = document.getElementById('ingredientFilterDropdown');
+    
+    if (query.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    
+    // Filter ingredients based on query
+    const filteredIngredients = ingredientFilterState.allIngredients.filter(ingredient =>
+        ingredient.name.toLowerCase().includes(query) &&
+        !ingredientFilterState.includeIngredients.some(inc => inc.id === ingredient.id) &&
+        !ingredientFilterState.excludeIngredients.some(exc => exc.id === ingredient.id)
+    );
+    
+    if (filteredIngredients.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    
+    // Render dropdown items
+    dropdown.innerHTML = filteredIngredients.slice(0, 10).map(ingredient => `
+        <div class="ingredient-filter-item" data-ingredient-id="${ingredient.id}" data-ingredient-name="${ingredient.name}">
+            <div>
+                <div class="ingredient-name">${ingredient.name}</div>
+                ${ingredient.category ? `<div class="ingredient-category">${ingredient.category}</div>` : ''}
+            </div>
+            <div class="click-hint">Left: include, Right: exclude</div>
+        </div>
+    `).join('');
+    
+    // Add event listeners to dropdown items
+    dropdown.querySelectorAll('.ingredient-filter-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            const ingredientId = item.dataset.ingredientId;
+            const ingredientName = item.dataset.ingredientName;
+            const ingredient = ingredientFilterState.allIngredients.find(ing => ing.id === ingredientId);
+            
+            if (ingredient) {
+                addIngredientFilter(ingredient, 'include');
+            }
+        });
+        
+        item.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const ingredientId = item.dataset.ingredientId;
+            const ingredientName = item.dataset.ingredientName;
+            const ingredient = ingredientFilterState.allIngredients.find(ing => ing.id === ingredientId);
+            
+            if (ingredient) {
+                addIngredientFilter(ingredient, 'exclude');
+            }
+        });
+    });
+    
+    dropdown.style.display = 'block';
+}
+
+function addIngredientFilter(ingredient, type) {
+    // Remove from opposite list if exists
+    if (type === 'include') {
+        ingredientFilterState.excludeIngredients = ingredientFilterState.excludeIngredients.filter(
+            exc => exc.id !== ingredient.id
+        );
+        if (!ingredientFilterState.includeIngredients.some(inc => inc.id === ingredient.id)) {
+            ingredientFilterState.includeIngredients.push(ingredient);
+        }
+    } else {
+        ingredientFilterState.includeIngredients = ingredientFilterState.includeIngredients.filter(
+            inc => inc.id !== ingredient.id
+        );
+        if (!ingredientFilterState.excludeIngredients.some(exc => exc.id === ingredient.id)) {
+            ingredientFilterState.excludeIngredients.push(ingredient);
+        }
+    }
+    
+    // Clear input and hide dropdown
+    document.getElementById('ingredientFilterSearch').value = '';
+    document.getElementById('ingredientFilterDropdown').style.display = 'none';
+    
+    // Re-render selected filters
+    renderSelectedIngredientFilters();
+    
+    // Trigger recipe filtering
+    filterRecipes();
+}
+
+function removeIngredientFilter(ingredientId, type) {
+    if (type === 'include') {
+        ingredientFilterState.includeIngredients = ingredientFilterState.includeIngredients.filter(
+            inc => inc.id !== ingredientId
+        );
+    } else {
+        ingredientFilterState.excludeIngredients = ingredientFilterState.excludeIngredients.filter(
+            exc => exc.id !== ingredientId
+        );
+    }
+    
+    renderSelectedIngredientFilters();
+    filterRecipes();
+}
+
+function renderSelectedIngredientFilters() {
+    const container = document.getElementById('selectedIngredientFilters');
+    if (!container) return;
+    
+    const includeHtml = ingredientFilterState.includeIngredients.map(ingredient => `
+        <div class="ingredient-filter-pill include" data-ingredient-id="${ingredient.id}" data-type="include">
+            <span>+${ingredient.name}</span>
+            <button class="remove-pill" onclick="removeIngredientFilter('${ingredient.id}', 'include')">&times;</button>
+        </div>
+    `).join('');
+    
+    const excludeHtml = ingredientFilterState.excludeIngredients.map(ingredient => `
+        <div class="ingredient-filter-pill exclude" data-ingredient-id="${ingredient.id}" data-type="exclude">
+            <span>-${ingredient.name}</span>
+            <button class="remove-pill" onclick="removeIngredientFilter('${ingredient.id}', 'exclude')">&times;</button>
+        </div>
+    `).join('');
+    
+    container.innerHTML = includeHtml + excludeHtml;
+}
+
 // Global functions for onclick handlers
 window.viewRecipe = viewRecipe;
 window.editRecipe = editRecipe;
@@ -1929,3 +2430,4 @@ window.removeImage = removeImage;
 window.showModal = showModal;
 window.hideModal = hideModal;
 window.updateInstructionsPreview = updateInstructionsPreview;
+window.removeIngredientFilter = removeIngredientFilter;
